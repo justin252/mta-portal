@@ -48,8 +48,8 @@ def get_arrival_times():
     return n0, n1, s0, s1, n2, s2
 
 def update_text(n0, n1, s0, s1, n2, s2):
-    text_lines[2].text = "%s,%s,%s m" % (n0,n1,n2)
-    text_lines[4].text = "%s,%s,%s m" % (s0,s1,s2)
+    text_lines[2].text = "%s,%s,%s" % (n0,n1,n2)
+    text_lines[4].text = "%s,%s,%s" % (s0,s1,s2)
     display.root_group = group
 
 def attempt_wifi_reconnect():
@@ -89,10 +89,10 @@ colors = [0x444444, 0xDD8000]  # [dim white, gold]
 font = bitmap_font.load_font("fonts/5x7.bdf")
 text_lines = [
     displayio.TileGrid(bitmap, pixel_shader=getattr(bitmap, 'pixel_shader', displayio.ColorConverter())),
-    adafruit_display_text.label.Label(font, color=colors[0], x=20, y=5, text="Manhattan"),
-    adafruit_display_text.label.Label(font, color=colors[1], x=20, y=12, text="- mins"),
-    adafruit_display_text.label.Label(font, color=colors[0], x=20, y=21, text="Canarsie"),
-    adafruit_display_text.label.Label(font, color=colors[1], x=20, y=28, text="- mins"),
+    adafruit_display_text.label.Label(font, color=colors[0], x=18, y=4, text="Manhattan"),
+    adafruit_display_text.label.Label(font, color=colors[1], x=18, y=11, text="-"),
+    adafruit_display_text.label.Label(font, color=colors[0], x=18, y=20, text="Canarsie"),
+    adafruit_display_text.label.Label(font, color=colors[1], x=18, y=27, text="-"),
 ]
 for x in text_lines:
     group.append(x)
