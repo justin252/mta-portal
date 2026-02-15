@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-time NYC MTA L train arrival times. Fetches from `wheresthefuckingtrain.com` API, shows next northbound (Manhattan) and southbound (Canarsie) arrivals at stop `L11`.
+CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-time NYC MTA train arrival times. Toggles between L train (stop L11 - Graham Av) and G train (stop G22 - Metropolitan Av) via hardware buttons. Fetches from `wheresthefuckingtrain.com` API, shows next northbound and southbound arrivals.
 
 ## Platform
 
@@ -14,13 +14,13 @@ CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-tim
 
 ## Development
 
-**Deploy**: Copy `code.py`, `l-dashboard.bmp`, and `fonts/` to the CIRCUITPY USB drive. Board auto-runs `code.py` on save (auto-reload).
+**Deploy**: Copy `boot.py`, `code.py`, `l-dashboard.bmp`, and `fonts/` to the CIRCUITPY USB drive. Board auto-runs `code.py` on save (auto-reload). `boot.py` enables filesystem writes for persistent state.
 
 **Debug**: Connect serial console (e.g. `screen /dev/tty.usbmodem* 115200` or Mu editor) to see `print()` output and errors.
 
 **WiFi config**: Board reads `settings.toml` on CIRCUITPY drive for `CIRCUITPY_WIFI_SSID` and `CIRCUITPY_WIFI_PASSWORD`. This file is on-device only, not in the repo.
 
-**Libraries**: Adafruit CircuitPython Bundle libs required on device in `/lib`: `adafruit_matrixportal`, `adafruit_display_text`, `adafruit_bitmap_font`, `adafruit_datetime`. Install by copying `.mpy` files from the bundle.
+**Libraries**: Adafruit CircuitPython Bundle libs required on device in `/lib`: `adafruit_matrixportal`, `adafruit_display_text`, `adafruit_bitmap_font`, `adafruit_datetime`, `adafruit_debouncer`. Install by copying `.mpy` files from the bundle.
 
 ## Architecture
 
@@ -30,7 +30,8 @@ CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-tim
 - Filters arrivals < `MINIMUM_MINUTES_DISPLAY` (9 min) — too soon to catch
 - Resets microcontroller after `ERROR_RESET_THRESHOLD` (3) consecutive failures
 - WiFi reconnection: on error, checks `esp.is_connected`, attempts `connect_AP`, falls back to `esp.reset()`
-- Structured serial logging: `[OK]`, `[ERR]`, `[RECONNECT]`, `[RESET]` prefixes
+- Button toggle: UP → L train, DOWN → G train. Persists to `/train_state.txt`, 1s fade animation on switch.
+- Structured serial logging: `[OK]`, `[ERR]`, `[RECONNECT]`, `[RESET]`, `[BTN]` prefixes
 
 ## Testing
 
