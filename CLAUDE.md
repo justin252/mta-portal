@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-time NYC MTA train arrival times. Toggles between L train (stop L11 - Graham Av) and G train (stop G22 - Metropolitan Av) via hardware buttons. Fetches from `wheresthefuckingtrain.com` API, shows next northbound and southbound arrivals.
+CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-time NYC MTA train arrival times. Toggles between L train (stop L11 - Graham Av) and G train (stop G29 - Metropolitan Av) via hardware buttons. Fetches from `wheresthefuckingtrain.com` API, shows next 3 arrivals in each direction.
 
 ## Platform
 
@@ -14,7 +14,7 @@ CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-tim
 
 ## Development
 
-**Deploy**: Copy `boot.py`, `code.py`, `l-dashboard.bmp`, and `fonts/` to the CIRCUITPY USB drive. Board auto-runs `code.py` on save (auto-reload). `boot.py` enables filesystem writes for persistent state.
+**Deploy**: `cp boot.py code.py logic.py *.bmp /Volumes/CIRCUITPY/ && cp -r fonts /Volumes/CIRCUITPY/`. Board auto-runs `code.py` on save (auto-reload).
 
 **Debug**: Connect serial console (e.g. `screen /dev/tty.usbmodem* 115200` or Mu editor) to see `print()` output and errors.
 
@@ -25,12 +25,11 @@ CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-tim
 ## Architecture
 
 - `code.py` — hardware-dependent main loop: fetch → parse → display. Runs on-device only.
-- `logic.py` — pure functions (`get_arrival_in_minutes_from_now`, `filter_arrivals`, `format_arrival_pair`). Desktop-testable with stdlib `datetime`.
-- Polls API every `UPDATE_DELAY` (15s), syncs NTP every `SYNC_TIME_DELAY` (30s)
-- Filters arrivals < `MINIMUM_MINUTES_DISPLAY` (9 min) — too soon to catch
+- `logic.py` — pure functions (`get_arrival_in_minutes_from_now`, `filter_arrivals`, `format_arrival_triple`). Works on both CircuitPython and desktop.
+- Polls API every `UPDATE_DELAY` (30s) — matches MTA feed refresh cadence, minimizes main loop blocking
 - Resets microcontroller after `ERROR_RESET_THRESHOLD` (3) consecutive failures
 - WiFi reconnection: on error, checks `esp.is_connected`, attempts `connect_AP`, falls back to `esp.reset()`
-- Button toggle: UP → L train, DOWN → G train. Persists to `/train_state.txt`, 1s fade animation on switch.
+- Button toggle: UP → L train, DOWN → G train. Always defaults to L on boot.
 - Structured serial logging: `[OK]`, `[ERR]`, `[RECONNECT]`, `[RESET]`, `[BTN]` prefixes
 
 ## Testing

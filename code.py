@@ -1,3 +1,4 @@
+import os
 import time
 import microcontroller
 import board
@@ -10,6 +11,7 @@ from adafruit_datetime import datetime
 from adafruit_bitmap_font import bitmap_font
 from adafruit_matrixportal.matrix import Matrix
 from adafruit_matrixportal.network import Network
+from logic import filter_arrivals, format_arrival_triple
 
 STATIONS = {
     'L': {
@@ -27,26 +29,12 @@ STATIONS = {
         'bitmap': 'g-dashboard.bmp'
     }
 }
-STATE_FILE = '/train_state.txt'
 DATA_SOURCE = None  # Set dynamically
 DATA_LOCATION = ["data"]
-UPDATE_DELAY = 15
+# MTA feeds update ~30s; matches that cadence while minimizing main loop blocking
+UPDATE_DELAY = 30
 SYNC_TIME_DELAY = 30
 ERROR_RESET_THRESHOLD = 3
-
-def get_arrival_in_minutes_from_now(now, date_str):
-    train_date = datetime.fromisoformat(date_str).replace(tzinfo=None)
-    return round((train_date-now).total_seconds()/60.0)
-
-def filter_arrivals(now, time_strings):
-    minutes = [get_arrival_in_minutes_from_now(now, t) for t in time_strings]
-    return [m for m in minutes if m >= 0]
-
-def format_arrival_triple(minutes_list):
-    v0 = str(minutes_list[0]) if len(minutes_list) > 0 else '-'
-    v1 = str(minutes_list[1]) if len(minutes_list) > 1 else '-'
-    v2 = str(minutes_list[2]) if len(minutes_list) > 2 else '-'
-    return v0, v1, v2
 
 def get_arrival_times(route):
     stop_trains = network.fetch_data(DATA_SOURCE, json_path=(DATA_LOCATION,))
@@ -74,11 +62,10 @@ def attempt_wifi_reconnect():
     esp = network._wifi.esp
     if esp.is_connected:
         return
+    ssid = os.getenv("CIRCUITPY_WIFI_SSID")
+    password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
     print("[RECONNECT] wifi_connected=False, attempting esp.connect_AP...")
     try:
-        import os
-        ssid = os.getenv("CIRCUITPY_WIFI_SSID")
-        password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
         esp.connect_AP(ssid, password)
         print("[RECONNECT] success")
     except Exception as e:
@@ -86,9 +73,6 @@ def attempt_wifi_reconnect():
         try:
             esp.reset()
             time.sleep(2)
-            import os
-            ssid = os.getenv("CIRCUITPY_WIFI_SSID")
-            password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
             esp.connect_AP(ssid, password)
             print("[RECONNECT] success after ESP reset")
         except Exception as e2:
