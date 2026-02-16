@@ -1,6 +1,9 @@
-"""Pure functions for MTA arrival logic. Desktop-testable (no hardware deps)."""
+"""Pure functions for MTA arrival logic. Works on both CircuitPython and desktop."""
 
-from datetime import datetime
+try:
+    from adafruit_datetime import datetime
+except ImportError:
+    from datetime import datetime
 
 
 def get_arrival_in_minutes_from_now(now, date_str):
