@@ -48,11 +48,11 @@ def format_arrival_triple(minutes_list):
     v2 = str(minutes_list[2]) if len(minutes_list) > 2 else '-'
     return v0, v1, v2
 
-def get_arrival_times():
+def get_arrival_times(route):
     stop_trains = network.fetch_data(DATA_SOURCE, json_path=(DATA_LOCATION,))
     stop_data = stop_trains[0]
-    northbound_trains = [x['time'] for x in stop_data.get('N', [])]
-    southbound_trains = [x['time'] for x in stop_data.get('S', [])]
+    northbound_trains = [x['time'] for x in stop_data.get('N', []) if x.get('route') == route]
+    southbound_trains = [x['time'] for x in stop_data.get('S', []) if x.get('route') == route]
 
     now = datetime.now()
 
@@ -99,9 +99,10 @@ def switch_line(new_line):
     global DATA_SOURCE
     DATA_SOURCE = 'https://api.wheresthefuckingtrain.com/by-id/%s' % station['stop_id']
 
-    global bitmap
-    bitmap_file = open(station['bitmap'], 'rb')
-    bitmap = displayio.OnDiskBitmap(bitmap_file)
+    global bitmap, _bitmap_file
+    _bitmap_file.close()
+    _bitmap_file = open(station['bitmap'], 'rb')
+    bitmap = displayio.OnDiskBitmap(_bitmap_file)
 
     group.pop(0)
     tile_grid = displayio.TileGrid(bitmap, pixel_shader=getattr(bitmap, 'pixel_shader', displayio.ColorConverter()))
@@ -128,7 +129,8 @@ font = bitmap_font.load_font("fonts/5x7.bdf")
 current_line = 'L'
 station = STATIONS[current_line]
 DATA_SOURCE = 'https://api.wheresthefuckingtrain.com/by-id/%s' % station['stop_id']
-bitmap = displayio.OnDiskBitmap(open(station['bitmap'], 'rb'))
+_bitmap_file = open(station['bitmap'], 'rb')
+bitmap = displayio.OnDiskBitmap(_bitmap_file)
 
 text_lines = [
     displayio.TileGrid(bitmap, pixel_shader=getattr(bitmap, 'pixel_shader', displayio.ColorConverter())),
@@ -164,11 +166,13 @@ while True:
         if current_line != 'L':
             switch_line('L')
             current_line = 'L'
+            last_update = None
     elif button_down.fell:
         print("[BTN] DOWN -> G")
         if current_line != 'G':
             switch_line('G')
             current_line = 'G'
+            last_update = None
 
     # API fetch on interval
     if last_update is None or time.monotonic() > last_update + UPDATE_DELAY:
@@ -176,7 +180,7 @@ while True:
             if last_time_sync is None or time.monotonic() > last_time_sync + SYNC_TIME_DELAY:
                 network.get_local_time()
                 last_time_sync = time.monotonic()
-            arrivals = get_arrival_times()
+            arrivals = get_arrival_times(current_line)
             update_text(*arrivals)
             error_counter = 0
             last_update = time.monotonic()
