@@ -25,14 +25,14 @@ STATIONS = {
         'name': 'L-Graham Av',
         'north': 'Manhattan',
         'south': 'Canarsie',
-        'bitmap': 'l-dashboard.bmp'
+        'bitmap': 'l-dashboard.bmp',
     },
     'G': {
         'stop_id': 'G29',
         'name': 'G-Metro Av',
         'north': 'Queens',
         'south': 'Church Av',
-        'bitmap': 'g-dashboard.bmp'
+        'bitmap': 'g-dashboard.bmp',
     }
 }
 DATA_SOURCE = None  # API URL, set dynamically based on active line
@@ -114,6 +114,28 @@ def switch_line(new_line):
     text_lines[2].text = "-,-,-"
     text_lines[4].text = "-,-,-"
 
+def show_train():
+    """Switch display to full-screen train pixel art."""
+    global current_view, _train_bitmap_file, train_bitmap
+    _train_bitmap_file = open('train.bmp', 'rb')
+    train_bitmap = displayio.OnDiskBitmap(_train_bitmap_file)
+    train_group = displayio.Group()
+    train_group.append(displayio.TileGrid(train_bitmap, pixel_shader=getattr(train_bitmap, 'pixel_shader', displayio.ColorConverter())))
+    display.root_group = train_group
+    current_view = 'train'
+    print("[BTN] show train view (%s)" % current_line)
+
+def show_arrivals():
+    """Switch display back to arrivals view."""
+    global current_view, _train_bitmap_file, train_bitmap
+    if _train_bitmap_file:
+        _train_bitmap_file.close()
+        _train_bitmap_file = None
+        train_bitmap = None
+    display.root_group = group
+    current_view = 'arrivals'
+    print("[BTN] show arrivals view")
+
 # --- Display setup ---
 matrix = Matrix()
 display = matrix.display
@@ -161,23 +183,51 @@ button_down = Debouncer(button_down_pin)
 error_counter = 0  # consecutive API failures — triggers hard reset at threshold
 last_time_sync = None  # monotonic timestamp of last NTP sync
 last_update = None  # monotonic timestamp of last successful API fetch
+current_view = 'arrivals'  # 'arrivals' or 'train'
+_train_bitmap_file = None
+train_bitmap = None
+LONG_PRESS_THRESHOLD = 1.0  # seconds
+button_press_time = None  # monotonic time when button was pressed
 
 # Main loop: poll buttons at 100ms, fetch API every UPDATE_DELAY seconds,
 # sync NTP every SYNC_TIME_DELAY seconds. On repeated failures, hard-reset.
+# Long press (>=1s) toggles train view; short press switches lines or exits train view.
 while True:
     button_up.update()
     button_down.update()
 
+    # Button press start — record time on fell (active-low: fell = pressed)
     if button_up.fell or button_down.fell:
-        new_line = 'L' if button_up.fell else 'G'
-        if current_line != new_line:
-            print("[BTN] %s -> %s" % ("UP" if button_up.fell else "DOWN", new_line))
-            switch_line(new_line)
-            current_line = new_line
-            last_update = None  # force immediate fetch
+        button_press_time = time.monotonic()
 
-    # Periodic API fetch — also runs immediately on first loop or after line switch
-    if last_update is None or time.monotonic() > last_update + UPDATE_DELAY:
+    # Button release — determine short vs long press
+    if button_up.rose or button_down.rose:
+        if button_press_time is not None:
+            held = time.monotonic() - button_press_time
+            button_press_time = None
+
+            if held >= LONG_PRESS_THRESHOLD:
+                # Long press: toggle between arrivals and train view
+                if current_view == 'arrivals':
+                    show_train()
+                else:
+                    show_arrivals()
+                    last_update = None  # force immediate fetch on return
+            else:
+                # Short press
+                if current_view == 'train':
+                    show_arrivals()
+                    last_update = None
+                else:
+                    new_line = 'L' if button_up.rose else 'G'
+                    if current_line != new_line:
+                        print("[BTN] %s -> %s" % ("UP" if button_up.rose else "DOWN", new_line))
+                        switch_line(new_line)
+                        current_line = new_line
+                        last_update = None  # force immediate fetch
+
+    # Periodic API fetch — skip while in train view (invisible labels)
+    if current_view == 'arrivals' and (last_update is None or time.monotonic() > last_update + UPDATE_DELAY):
         try:
             # NTP sync keeps adafruit_datetime.now() accurate for minute calculations
             if last_time_sync is None or time.monotonic() > last_time_sync + SYNC_TIME_DELAY:

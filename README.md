@@ -15,8 +15,10 @@ Board auto-reloads on file save.
 
 ## Usage
 
-- **UP** button: L train
-- **DOWN** button: G train
+- **Short press UP**: L train arrivals
+- **Short press DOWN**: G train arrivals
+- **Long press (1s) either button**: toggle full-screen pixel art train view
+- **Short press in train view**: return to arrivals
 
 ## Architecture
 
@@ -24,6 +26,7 @@ Board auto-reloads on file save.
 - `logic.py` — pure functions for time parsing/filtering (desktop-testable)
 - `boot.py` — enables filesystem writes for persistent train state
 - `*-dashboard.bmp` — pre-rendered line name/color bitmaps
+- `train.bmp` — full-screen pixel art subway car bitmap (rooftop disco scene)
 
 Data source: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/) API (wraps MTA GTFS-RT).
 
