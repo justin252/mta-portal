@@ -123,9 +123,8 @@ network = Network(status_neopixel=NEOPIXEL, debug=False)
 group = displayio.Group()
 colors = [0x444444, 0xDD8000]  # [dim white, gold]
 
-label_font = bitmap_font.load_font("fonts/test_label.bdf")
-time_font = bitmap_font.load_font("fonts/test_time.bdf")
-TALL_LABELS = False  # True for 11-12px label fonts (creep2, lemon)
+font_label = bitmap_font.load_font("fonts/tom-thumb.bdf")
+font_time = bitmap_font.load_font("fonts/spleen-5x8.bdf")
 
 # Load the L by default
 current_line = 'L'
@@ -139,13 +138,12 @@ bitmap = displayio.OnDiskBitmap(_bitmap_file)
 #                                |  [2] Arrival times "12,18,25"   (gold)
 #                                |  [3] Direction label "Canarsie"  (dim white)
 #                                |  [4] Arrival times "8,14,22"    (gold)
-y_label_n, y_time_n, y_label_s, y_time_s = (3, 13, 19, 29) if TALL_LABELS else (4, 11, 20, 27)
 text_lines = [
     displayio.TileGrid(bitmap, pixel_shader=getattr(bitmap, 'pixel_shader', displayio.ColorConverter())),
-    adafruit_display_text.label.Label(label_font, color=colors[0], x=18, y=y_label_n, text=station['north']),
-    adafruit_display_text.label.Label(time_font, color=colors[1], x=18, y=y_time_n, text="-"),
-    adafruit_display_text.label.Label(label_font, color=colors[0], x=18, y=y_label_s, text=station['south']),
-    adafruit_display_text.label.Label(time_font, color=colors[1], x=18, y=y_time_s, text="-"),
+    adafruit_display_text.label.Label(font_label, color=colors[0], x=18, y=4, text=station['north']),
+    adafruit_display_text.label.Label(font_time, color=colors[1], x=18, y=11, text="-"),
+    adafruit_display_text.label.Label(font_label, color=colors[0], x=18, y=20, text=station['south']),
+    adafruit_display_text.label.Label(font_time, color=colors[1], x=18, y=27, text="-"),
 ]
 for x in text_lines:
     group.append(x)
@@ -170,19 +168,13 @@ while True:
     button_up.update()
     button_down.update()
 
-    # Button press switches active train line and forces immediate API fetch
-    if button_up.fell:
-        print("[BTN] UP -> L")
-        if current_line != 'L':
-            switch_line('L')
-            current_line = 'L'
+    if button_up.fell or button_down.fell:
+        new_line = 'L' if button_up.fell else 'G'
+        if current_line != new_line:
+            print("[BTN] %s -> %s" % ("UP" if button_up.fell else "DOWN", new_line))
+            switch_line(new_line)
+            current_line = new_line
             last_update = None  # force immediate fetch
-    elif button_down.fell:
-        print("[BTN] DOWN -> G")
-        if current_line != 'G':
-            switch_line('G')
-            current_line = 'G'
-            last_update = None
 
     # Periodic API fetch — also runs immediately on first loop or after line switch
     if last_update is None or time.monotonic() > last_update + UPDATE_DELAY:
