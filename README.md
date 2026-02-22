@@ -22,6 +22,7 @@ Board auto-reloads on file save.
 
 - `code.py` — main loop: fetch → parse → display (on-device only)
 - `logic.py` — pure functions for time parsing/filtering (desktop-testable)
+- `simulate_display.py` — desktop display simulator (outputs scaled PNG)
 - `boot.py` — enables filesystem writes for persistent train state
 - `*-dashboard.bmp` — pre-rendered line name/color bitmaps
 
@@ -32,6 +33,14 @@ Data source: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/)
 **Polling (30s)**: MTA feeds update ~30s — polling matches that cadence. Display shows whole minutes, so sub-30s precision doesn't help. Each fetch blocks the main loop (no threading in CircuitPython), so less polling = better button responsiveness.
 
 **Error recovery**: Network errors are common on microcontrollers. On failure, the board tries reconnecting WiFi, then resets the ESP32 chip, then reboots the entire board after 3 consecutive failures — recovering automatically without manual intervention.
+
+## Display Simulator
+
+Renders the LED matrix output as a PNG on desktop (requires Pillow):
+```bash
+python3 simulate_display.py                          # L train, placeholder times
+python3 simulate_display.py --line G --north 2,7,15 --south 4,9,20
+```
 
 ## Testing
 
