@@ -45,9 +45,16 @@ Outputs `simulated_display.png` (640x320, 10x scale). Parses the same BDF fonts 
 
 **Unit tests** (run from `/tmp` to avoid `code.py` shadowing Python's `code` module):
 ```bash
-cd /tmp && python3 -m pytest /path/to/mta-portal/test_logic.py -v
+cd /tmp && python3 -m pytest ~/code/mta-portal/test_logic.py ~/code/mta-portal/test_simulate_display.py -v
 ```
-Run before every commit.
+Run before every commit. `test_simulate_display.py` validates BDF parsing, pixel-level rendering, and reference image comparison (64x32 PNGs in `test_fixtures/`).
+
+**Display verification workflow** (for any display changes):
+1. Edit rendering code (colors, layout, fonts, new screens)
+2. `python3 simulate_display.py -o /tmp/check.png` → visually verify the PNG
+3. If correct, update references: `python3 -c "from simulate_display import render_display; render_display().save('test_fixtures/ref_L.png'); render_display('G','2,7,15','4,9,20').save('test_fixtures/ref_G.png')"`
+4. Run tests to confirm they pass with new references
+5. Commit updated references alongside code changes
 
 **Serial monitoring**: `screen /dev/tty.usbmodem* 115200` — watch structured logs during operation.
 
