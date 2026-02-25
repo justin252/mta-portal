@@ -110,7 +110,14 @@ def main():
         scaled.save(args.output)
         return
 
-    station = STATIONS[args.line]
+    canvas = render_display(args.line, args.north, args.south)
+    scaled = canvas.resize((DISPLAY_W * SCALE, DISPLAY_H * SCALE), Image.NEAREST)
+    scaled.save(args.output)
+
+
+def render_display(line='L', north='3,8,14', south='1,5,12'):
+    """Render 64x32 canvas matching the LED matrix. Returns PIL Image (pre-scale)."""
+    station = STATIONS[line]
     font_label = parse_bdf(os.path.join(SCRIPT_DIR, 'fonts/tom-thumb.bdf'))
     font_time = parse_bdf(os.path.join(SCRIPT_DIR, 'fonts/spleen-5x8.bdf'))
 
@@ -120,12 +127,10 @@ def main():
 
     # Matches code.py lines 141-147: label/time pairs at fixed positions
     render_text(canvas, font_label, station['north'], 18, 4, COLORS['label'])
-    render_text(canvas, font_time, args.north, 18, 11, COLORS['time'])
+    render_text(canvas, font_time, north, 18, 11, COLORS['time'])
     render_text(canvas, font_label, station['south'], 18, 20, COLORS['label'])
-    render_text(canvas, font_time, args.south, 18, 27, COLORS['time'])
-
-    scaled = canvas.resize((DISPLAY_W * SCALE, DISPLAY_H * SCALE), Image.NEAREST)
-    scaled.save(args.output)
+    render_text(canvas, font_time, south, 18, 27, COLORS['time'])
+    return canvas
 
 
 if __name__ == '__main__':
