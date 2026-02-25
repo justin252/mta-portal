@@ -22,10 +22,19 @@ CircuitPython app for an Adafruit MatrixPortal M4 LED matrix displaying real-tim
 
 **Libraries**: Adafruit CircuitPython Bundle libs required on device in `/lib`: `adafruit_matrixportal`, `adafruit_display_text`, `adafruit_bitmap_font`, `adafruit_datetime`, `adafruit_debouncer`. Install by copying `.mpy` files from the bundle.
 
+**Simulate display** (desktop, requires Pillow):
+```bash
+python3 simulate_display.py                          # L train, placeholder times
+python3 simulate_display.py --line G                 # G train
+python3 simulate_display.py --north 3,8,14 --south 1,5,12
+```
+Outputs `simulated_display.png` (640x320, 10x scale). Parses the same BDF fonts and BMP bitmaps used on-device.
+
 ## Architecture
 
 - `code.py` — hardware-dependent main loop: fetch → parse → display. Runs on-device only.
 - `logic.py` — pure functions (`get_arrival_in_minutes_from_now`, `filter_arrivals`, `format_arrival_triple`). Works on both CircuitPython and desktop.
+- `simulate_display.py` — PIL-based display simulator. Renders identical 64x32 output as a scaled PNG using the same fonts/bitmaps.
 - Polls API every `UPDATE_DELAY` (30s) — matches MTA feed refresh cadence, minimizes main loop blocking
 - Resets microcontroller after `ERROR_RESET_THRESHOLD` (3) consecutive failures
 - WiFi reconnection: on error, checks `esp.is_connected`, attempts `connect_AP`, falls back to `esp.reset()`
