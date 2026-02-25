@@ -1,6 +1,6 @@
-## Main loop for MatrixPortal M4 LED sign showing NYC subway arrivals.
-## Fetches from wheresthefuckingtrain.com API, displays next 3 northbound
-## and southbound trains. Hardware buttons toggle between L and G lines.
+## Main loop for MatrixPortal M4 LED sign. Cycles between L train arrivals,
+## G train arrivals, and current weather. Buttons jump to L (UP) or G (DOWN).
+## Long press toggles full-screen train pixel art view.
 
 import os
 import time
@@ -16,58 +16,109 @@ from adafruit_bitmap_font import bitmap_font
 from adafruit_matrixportal.matrix import Matrix
 from adafruit_matrixportal.network import Network
 from logic import filter_arrivals, format_arrival_triple
+from weather import parse_nws_forecast, map_condition, format_temperature
 
-# Station configs keyed by train line — stop_id maps to the API endpoint,
-# bitmap is the left-side logo rendered on the LED matrix
 STATIONS = {
     'L': {
         'stop_id': 'L11',
-        'name': 'L-Graham Av',
         'north': 'Manhattan',
         'south': 'Canarsie',
         'bitmap': 'l-dashboard.bmp',
     },
     'G': {
         'stop_id': 'G29',
-        'name': 'G-Metro Av',
         'north': 'Queens',
         'south': 'Church Av',
         'bitmap': 'g-dashboard.bmp',
     }
 }
-DATA_SOURCE = None  # API URL, set dynamically based on active line
-DATA_LOCATION = ["data"]  # JSON path to extract from API response
-# MTA feeds update ~30s; matches that cadence while minimizing main loop blocking
-UPDATE_DELAY = 30
-SYNC_TIME_DELAY = 30  # NTP time sync interval (seconds)
-ERROR_RESET_THRESHOLD = 3  # consecutive failures before hard reset
+API_BASE = 'https://api.wheresthefuckingtrain.com/by-id/%s'
+DATA_LOCATION = ["data"]
+WEATHER_URL = 'https://api.weather.gov/gridpoints/OKX/35,35/forecast'
 
-def get_arrival_times(route):
-    """Fetch API, filter by route, return 6 display strings (3 north, 3 south)."""
-    stop_trains = network.fetch_data(DATA_SOURCE, json_path=(DATA_LOCATION,))
+UPDATE_DELAY = 30           # train fetch interval (seconds)
+WEATHER_UPDATE_DELAY = 300  # weather fetch interval (5 min)
+SCREEN_CYCLE_DELAY = 10    # seconds between screen switches
+SYNC_TIME_DELAY = 30
+ERROR_RESET_THRESHOLD = 3
+LONG_PRESS_THRESHOLD = 1.0  # seconds
+
+
+def fetch_train(line):
+    """Fetch arrivals for one line. Returns (n0,n1,n2,s0,s1,s2) display strings."""
+    url = API_BASE % STATIONS[line]['stop_id']
+    stop_trains = network.fetch_data(url, json_path=(DATA_LOCATION,))
     stop_data = stop_trains[0]
-    # API returns N/S arrays of {route, time} — filter to the active line
-    northbound_trains = [x['time'] for x in stop_data.get('N', []) if x.get('route') == route]
-    southbound_trains = [x['time'] for x in stop_data.get('S', []) if x.get('route') == route]
-
+    northbound = [x['time'] for x in stop_data.get('N', []) if x.get('route') == line]
+    southbound = [x['time'] for x in stop_data.get('S', []) if x.get('route') == line]
     now = datetime.now()
-
-    # filter_arrivals removes trains too soon to catch; format_arrival_triple
-    # converts minutes-from-now into display strings (e.g. "12" or "-")
-    n = filter_arrivals(now, northbound_trains)
-    s = filter_arrivals(now, southbound_trains)
-
+    n = filter_arrivals(now, northbound)
+    s = filter_arrivals(now, southbound)
     n0, n1, n2 = format_arrival_triple(n)
     s0, s1, s2 = format_arrival_triple(s)
+    print("[OK] %s N:%s,%s,%s S:%s,%s,%s" % (line, n0, n1, n2, s0, s1, s2))
+    return n0, n1, n2, s0, s1, s2
 
-    print("[OK] fetch success, next N: %s,%s,%s S: %s,%s,%s" % (n0, n1, n2, s0, s1, s2))
-    return n0, n1, s0, s1, n2, s2
 
-def update_text(n0, n1, s0, s1, n2, s2):
-    """Write arrival times to the northbound (index 2) and southbound (index 4) labels."""
-    text_lines[2].text = "%s,%s,%s" % (n0,n1,n2)
-    text_lines[4].text = "%s,%s,%s" % (s0,s1,s2)
-    display.root_group = group
+def update_train_display(line, arrivals):
+    """Write arrival times into the display group for a train line."""
+    n0, n1, n2, s0, s1, s2 = arrivals
+    labels = train_labels[line]
+    labels['north_times'].text = "%s,%s,%s" % (n0, n1, n2)
+    labels['south_times'].text = "%s,%s,%s" % (s0, s1, s2)
+
+
+def fetch_weather():
+    """Fetch weather from NWS. Returns parsed dict or None on error."""
+    try:
+        resp = network._wifi.requests.get(WEATHER_URL, headers={"User-Agent": "mta-portal"})
+        data = resp.json()
+        resp.close()
+        weather = parse_nws_forecast(data)
+        print("[WEATHER] %s %d°F" % (weather['short_forecast'], weather['temp_f']))
+        return weather
+    except Exception as e:
+        print("[WEATHER] fetch failed: %s" % e)
+        return None
+
+
+def update_weather_display(weather):
+    """Update weather display group with new data."""
+    global _weather_bitmap_file
+    icon_file, label = map_condition(weather['icon_url'])
+    _weather_bitmap_file.close()
+    _weather_bitmap_file = open(icon_file, 'rb')
+    new_bmp = displayio.OnDiskBitmap(_weather_bitmap_file)
+    weather_group.pop(0)
+    tile = displayio.TileGrid(new_bmp, pixel_shader=getattr(new_bmp, 'pixel_shader', displayio.ColorConverter()))
+    weather_group.insert(0, tile)
+    weather_labels['condition'].text = label
+    weather_labels['temp'].text = format_temperature(weather['temp_f'])
+
+
+def show_train_art():
+    """Switch display to full-screen train pixel art."""
+    global current_view, _train_art_file
+    _train_art_file = open('train.bmp', 'rb')
+    bmp = displayio.OnDiskBitmap(_train_art_file)
+    grp = displayio.Group()
+    grp.append(displayio.TileGrid(bmp, pixel_shader=getattr(bmp, 'pixel_shader', displayio.ColorConverter())))
+    display.root_group = grp
+    current_view = 'train_art'
+    print("[BTN] show train art")
+
+
+def exit_train_art():
+    """Return from train pixel art to cycling mode."""
+    global current_view, _train_art_file, last_cycle_switch
+    if _train_art_file:
+        _train_art_file.close()
+        _train_art_file = None
+    display.root_group = screens[screen_idx][1]
+    current_view = 'cycle'
+    last_cycle_switch = time.monotonic()
+    print("[BTN] exit train art")
+
 
 def attempt_wifi_reconnect():
     """Try reconnecting WiFi; if connect_AP fails, hard-reset the ESP32 coprocessor."""
@@ -76,7 +127,7 @@ def attempt_wifi_reconnect():
         return
     ssid = os.getenv("CIRCUITPY_WIFI_SSID")
     password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
-    print("[RECONNECT] wifi_connected=False, attempting esp.connect_AP...")
+    print("[RECONNECT] attempting esp.connect_AP...")
     try:
         esp.connect_AP(ssid, password)
         print("[RECONNECT] success")
@@ -90,88 +141,57 @@ def attempt_wifi_reconnect():
         except Exception as e2:
             print("[RECONNECT] ESP reset failed: %s" % (e2,))
 
-def switch_line(new_line):
-    """Swap the active line: update API endpoint, reload bitmap logo, reset labels."""
-    station = STATIONS[new_line]
-    global DATA_SOURCE
-    DATA_SOURCE = 'https://api.wheresthefuckingtrain.com/by-id/%s' % station['stop_id']
-
-    # Swap the bitmap — must keep file handle open for OnDiskBitmap
-    global bitmap, _bitmap_file
-    _bitmap_file.close()
-    _bitmap_file = open(station['bitmap'], 'rb')
-    bitmap = displayio.OnDiskBitmap(_bitmap_file)
-
-    # Replace the logo tile at index 0 in the display group
-    group.pop(0)
-    tile_grid = displayio.TileGrid(bitmap, pixel_shader=getattr(bitmap, 'pixel_shader', displayio.ColorConverter()))
-    group.insert(0, tile_grid)
-    text_lines[0] = tile_grid
-
-    # Update direction labels and clear arrival times
-    text_lines[1].text = station['north']
-    text_lines[3].text = station['south']
-    text_lines[2].text = "-,-,-"
-    text_lines[4].text = "-,-,-"
-
-def show_train():
-    """Switch display to full-screen train pixel art."""
-    global current_view, _train_bitmap_file, train_bitmap
-    _train_bitmap_file = open('train.bmp', 'rb')
-    train_bitmap = displayio.OnDiskBitmap(_train_bitmap_file)
-    train_group = displayio.Group()
-    train_group.append(displayio.TileGrid(train_bitmap, pixel_shader=getattr(train_bitmap, 'pixel_shader', displayio.ColorConverter())))
-    display.root_group = train_group
-    current_view = 'train'
-    print("[BTN] show train view (%s)" % current_line)
-
-def show_arrivals():
-    """Switch display back to arrivals view."""
-    global current_view, _train_bitmap_file, train_bitmap
-    if _train_bitmap_file:
-        _train_bitmap_file.close()
-        _train_bitmap_file = None
-        train_bitmap = None
-    display.root_group = group
-    current_view = 'arrivals'
-    print("[BTN] show arrivals view")
 
 # --- Display setup ---
 matrix = Matrix()
 display = matrix.display
 network = Network(status_neopixel=NEOPIXEL, debug=False)
 
-# --- Drawing setup ---
-group = displayio.Group()
 colors = [0x444444, 0xDD8000]  # [dim white, gold]
-
 font_label = bitmap_font.load_font("fonts/tom-thumb.bdf")
 font_time = bitmap_font.load_font("fonts/spleen-5x8.bdf")
 
-# Load the L by default
-current_line = 'L'
-station = STATIONS[current_line]
-DATA_SOURCE = 'https://api.wheresthefuckingtrain.com/by-id/%s' % station['stop_id']
-_bitmap_file = open(station['bitmap'], 'rb')
-bitmap = displayio.OnDiskBitmap(_bitmap_file)
 
-# Display layout (64x32 matrix):
-#   [0] Bitmap logo (left 18px)  |  [1] Direction label "Manhattan" (dim white)
-#                                |  [2] Arrival times "12,18,25"   (gold)
-#                                |  [3] Direction label "Canarsie"  (dim white)
-#                                |  [4] Arrival times "8,14,22"    (gold)
-text_lines = [
-    displayio.TileGrid(bitmap, pixel_shader=getattr(bitmap, 'pixel_shader', displayio.ColorConverter())),
-    adafruit_display_text.label.Label(font_label, color=colors[0], x=18, y=4, text=station['north']),
-    adafruit_display_text.label.Label(font_time, color=colors[1], x=18, y=11, text="-"),
-    adafruit_display_text.label.Label(font_label, color=colors[0], x=18, y=20, text=station['south']),
-    adafruit_display_text.label.Label(font_time, color=colors[1], x=18, y=27, text="-"),
-]
-for x in text_lines:
-    group.append(x)
-display.root_group = group
+def build_train_group(line):
+    """Create a display group for a train line. Returns (group, labels_dict, bitmap_file)."""
+    station = STATIONS[line]
+    bmp_file = open(station['bitmap'], 'rb')
+    bmp = displayio.OnDiskBitmap(bmp_file)
+    grp = displayio.Group()
+    tile = displayio.TileGrid(bmp, pixel_shader=getattr(bmp, 'pixel_shader', displayio.ColorConverter()))
+    north_label = adafruit_display_text.label.Label(font_label, color=colors[0], x=18, y=4, text=station['north'])
+    north_times = adafruit_display_text.label.Label(font_time, color=colors[1], x=18, y=11, text="-,-,-")
+    south_label = adafruit_display_text.label.Label(font_label, color=colors[0], x=18, y=20, text=station['south'])
+    south_times = adafruit_display_text.label.Label(font_time, color=colors[1], x=18, y=27, text="-,-,-")
+    for el in [tile, north_label, north_times, south_label, south_times]:
+        grp.append(el)
+    labels = {'north_times': north_times, 'south_times': south_times}
+    return grp, labels, bmp_file
 
-# Hardware buttons (active-low with internal pull-up) — debounced to avoid ghost presses
+
+# Build train display groups
+l_group, l_labels, _l_bitmap_file = build_train_group('L')
+g_group, g_labels, _g_bitmap_file = build_train_group('G')
+train_labels = {'L': l_labels, 'G': g_labels}
+
+# Build weather display group
+_weather_bitmap_file = open('weather-cloud.bmp', 'rb')
+_weather_bmp = displayio.OnDiskBitmap(_weather_bitmap_file)
+weather_group = displayio.Group()
+_weather_tile = displayio.TileGrid(_weather_bmp, pixel_shader=getattr(_weather_bmp, 'pixel_shader', displayio.ColorConverter()))
+weather_labels = {
+    'condition': adafruit_display_text.label.Label(font_label, color=colors[0], x=18, y=10, text="--"),
+    'temp': adafruit_display_text.label.Label(font_time, color=colors[1], x=18, y=22, text="--"),
+}
+for el in [_weather_tile, weather_labels['condition'], weather_labels['temp']]:
+    weather_group.append(el)
+
+# Screen cycling: L → G → weather → L → ...
+screens = [('L', l_group), ('G', g_group), ('weather', weather_group)]
+screen_idx = 0
+display.root_group = l_group
+
+# Hardware buttons
 button_up_pin = digitalio.DigitalInOut(board.BUTTON_UP)
 button_up_pin.switch_to_input(pull=digitalio.Pull.UP)
 button_up = Debouncer(button_up_pin)
@@ -180,70 +200,89 @@ button_down_pin = digitalio.DigitalInOut(board.BUTTON_DOWN)
 button_down_pin.switch_to_input(pull=digitalio.Pull.UP)
 button_down = Debouncer(button_down_pin)
 
-error_counter = 0  # consecutive API failures — triggers hard reset at threshold
-last_time_sync = None  # monotonic timestamp of last NTP sync
-last_update = None  # monotonic timestamp of last successful API fetch
-current_view = 'arrivals'  # 'arrivals' or 'train'
-_train_bitmap_file = None
-train_bitmap = None
-LONG_PRESS_THRESHOLD = 1.0  # seconds
-button_press_time = None  # monotonic time when button was pressed
+# State
+error_counter = 0
+last_time_sync = None
+last_train_update = None
+last_weather_update = None
+last_cycle_switch = time.monotonic()
+cached_weather = None
+current_view = 'cycle'  # 'cycle' or 'train_art'
+_train_art_file = None
+button_press_time = None
 
-# Main loop: poll buttons at 100ms, fetch API every UPDATE_DELAY seconds,
-# sync NTP every SYNC_TIME_DELAY seconds. On repeated failures, hard-reset.
-# Long press (>=1s) toggles train view; short press switches lines or exits train view.
+# Main loop: poll buttons at 100ms, fetch trains every 30s, weather every 5min,
+# cycle display every 10s. Long press toggles train pixel art view.
 while True:
     button_up.update()
     button_down.update()
 
-    # Button press start — record time on fell (active-low: fell = pressed)
+    # Button press start — record time
     if button_up.fell or button_down.fell:
         button_press_time = time.monotonic()
 
-    # Button release — determine short vs long press
+    # Button release — short vs long press
     if button_up.rose or button_down.rose:
         if button_press_time is not None:
             held = time.monotonic() - button_press_time
             button_press_time = None
 
             if held >= LONG_PRESS_THRESHOLD:
-                # Long press: toggle between arrivals and train view
-                if current_view == 'arrivals':
-                    show_train()
+                # Long press: toggle train pixel art
+                if current_view == 'cycle':
+                    show_train_art()
                 else:
-                    show_arrivals()
-                    last_update = None  # force immediate fetch on return
+                    exit_train_art()
             else:
                 # Short press
-                if current_view == 'train':
-                    show_arrivals()
-                    last_update = None
+                if current_view == 'train_art':
+                    exit_train_art()
                 else:
-                    new_line = 'L' if button_up.rose else 'G'
-                    if current_line != new_line:
-                        print("[BTN] %s -> %s" % ("UP" if button_up.rose else "DOWN", new_line))
-                        switch_line(new_line)
-                        current_line = new_line
-                        last_update = None  # force immediate fetch
+                    target = 0 if button_up.rose else 1  # L=0, G=1
+                    if screen_idx != target:
+                        print("[BTN] %s -> %s" % ("UP" if button_up.rose else "DOWN", screens[target][0]))
+                        screen_idx = target
+                        display.root_group = screens[screen_idx][1]
+                        last_cycle_switch = time.monotonic()
 
-    # Periodic API fetch — skip while in train view (invisible labels)
-    if current_view == 'arrivals' and (last_update is None or time.monotonic() > last_update + UPDATE_DELAY):
+    now_mono = time.monotonic()
+
+    # Screen cycling — only when in cycle mode
+    if current_view == 'cycle' and now_mono > last_cycle_switch + SCREEN_CYCLE_DELAY:
+        next_idx = (screen_idx + 1) % len(screens)
+        # Skip weather screen if no data yet
+        if next_idx == 2 and cached_weather is None:
+            next_idx = 0
+        screen_idx = next_idx
+        display.root_group = screens[screen_idx][1]
+        last_cycle_switch = now_mono
+
+    # Periodic train fetch — both L and G
+    if last_train_update is None or now_mono > last_train_update + UPDATE_DELAY:
         try:
-            # NTP sync keeps adafruit_datetime.now() accurate for minute calculations
-            if last_time_sync is None or time.monotonic() > last_time_sync + SYNC_TIME_DELAY:
+            if last_time_sync is None or now_mono > last_time_sync + SYNC_TIME_DELAY:
                 network.get_local_time()
                 last_time_sync = time.monotonic()
-            arrivals = get_arrival_times(current_line)
-            update_text(*arrivals)
+            for line in ('L', 'G'):
+                arrivals = fetch_train(line)
+                update_train_display(line, arrivals)
             error_counter = 0
-            last_update = time.monotonic()
+            last_train_update = time.monotonic()
         except (ValueError, RuntimeError, OSError, BrokenPipeError, ConnectionError) as e:
-            print("[ERR] %s: %s - wifi_connected=%s" % (type(e).__name__, e, network._wifi.esp.is_connected))
+            print("[ERR] %s: %s - wifi=%s" % (type(e).__name__, e, network._wifi.esp.is_connected))
             error_counter = error_counter + 1
             if error_counter > ERROR_RESET_THRESHOLD:
-                print("[RESET] error_counter=%d, resetting microcontroller" % error_counter)
+                print("[RESET] error_counter=%d" % error_counter)
                 microcontroller.reset()
             attempt_wifi_reconnect()
-            last_update = time.monotonic()  # backoff — don't retry immediately
+            last_train_update = time.monotonic()
 
-    time.sleep(0.1)  # 100ms polling keeps button response snappy
+    # Periodic weather fetch
+    if last_weather_update is None or now_mono > last_weather_update + WEATHER_UPDATE_DELAY:
+        weather = fetch_weather()
+        if weather:
+            cached_weather = weather
+            update_weather_display(weather)
+        last_weather_update = time.monotonic()
+
+    time.sleep(0.1)
