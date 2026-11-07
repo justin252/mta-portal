@@ -20,8 +20,8 @@ STATES = {
            'texts': {'north': 'Queens', 'north_times': '2,7,15', 'south': 'Church Av', 'south_times': '-,-,-'}},
           lambda: render_display('G', '2,7,15', '-,-,-')),
     'weather': ({'screen': 'weather', 'bitmap': 'weather-cloud.bmp',
-                 'texts': {'condition': 'Cloudy', 'temp': '42°F'}},
-                lambda: render_weather_display('cloud', '42°F', 'Cloudy')),
+                 'texts': {'condition': 'Cloudy', 'temp': '42°F', 'hi_lo': 'H:48 L:37'}},
+                lambda: render_weather_display('cloud', '42°F', 'Cloudy', 'H:48 L:37')),
 }
 
 

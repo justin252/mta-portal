@@ -8,7 +8,8 @@ test_fixtures/device/ pin this down (test_simulate_display.py).
 
 WIDTH, HEIGHT = 64, 32
 BIT_DEPTH = 2  # Matrix() default: the LEDs show only the top 2 bits of each color channel
-TEXT_X = 18    # all text starts here; the logo or weather icon fills columns 1-15
+TEXT_X = 18          # train text; the L/G logo fills columns 1-15
+WEATHER_TEXT_X = 21  # weather text: icons end at column 15, so a 5-column gap
 
 FONTS = {'label': 'fonts/tom-thumb.bdf', 'time': 'fonts/spleen-5x8.bdf'}
 COLORS = {'label': 0x444444, 'time': 0xDD8000}  # dim white, gold
@@ -21,8 +22,9 @@ TRAIN_FIELDS = (
     ('south_times', 'time', TEXT_X, 27),
 )
 WEATHER_FIELDS = (
-    ('condition', 'label', TEXT_X, 10),
-    ('temp', 'time', TEXT_X, 22),
+    ('condition', 'label', WEATHER_TEXT_X, 6),
+    ('temp', 'time', WEATHER_TEXT_X, 16),
+    ('hi_lo', 'label', WEATHER_TEXT_X, 26),
 )
 
 LINES = ('L', 'G')  # screen order: UP jumps to LINES[0], DOWN to LINES[1]
