@@ -4,60 +4,51 @@ Real-time NYC subway arrivals + weather on a 64x32 RGB LED matrix ([Adafruit Mat
 
 ## Setup
 
-1. Create `settings.toml` on CIRCUITPY drive with `CIRCUITPY_WIFI_SSID` and `CIRCUITPY_WIFI_PASSWORD`
-2. Copy [CircuitPython Bundle](https://circuitpython.org/libraries) libs to `/lib`: `adafruit_matrixportal`, `adafruit_display_text`, `adafruit_bitmap_font`, `adafruit_datetime`, `adafruit_debouncer`
-3. Deploy to board:
-```bash
-cp code.py diag.py logic.py weather.py *.bmp /Volumes/CIRCUITPY/ && cp -r fonts /Volumes/CIRCUITPY/
-```
-
-Board auto-reloads on file save.
+1. Install CircuitPython 10 on the board.
+2. Create `settings.toml` on the CIRCUITPY drive with `CIRCUITPY_WIFI_SSID` and `CIRCUITPY_WIFI_PASSWORD`.
+3. Install the libraries: `circup install -r device-requirements.txt`.
+4. On your computer: `make setup`, then `make deploy` with the board on a USB data cable.
 
 ## Usage
 
-Display auto-cycles: **L train → G train → weather → repeat** (10s per screen).
+Display auto-cycles **L train (5s) → G train (2s) → weather (10s)**. The weather screen joins once the first weather fetch succeeds.
 
-- **Short press UP**: jump to L train screen
-- **Short press DOWN**: jump to G train screen
+- **Short press UP / DOWN**: jump to the L / G screen
 - **Long press (1s) either button**: toggle full-screen pixel art train view
-- **Short press in train view**: return to cycling
-- Cycling resumes automatically after button press
+- **Any press in train view**: return to cycling
 
 ## Architecture
 
-- `code.py` — main loop: fetch → parse → display (on-device only)
-- `logic.py` — pure functions for time parsing/filtering (desktop-testable)
-- `weather.py` — pure functions for NWS weather parsing (desktop-testable)
-- `simulate_display.py` — desktop display simulator (outputs scaled PNG), pixel-exact against the board
-- `layout.py` — screen positions, fonts and colors for the simulator
-- `diag.py`, `tools/portal.py` — capture the board's actual screen over USB and diff it against the simulator
-- `*-dashboard.bmp` — pre-rendered line name/color bitmaps
-- `weather-*.bmp` — weather icon bitmaps (sun/cloud/rain/snow/storm/fog)
-- `train.bmp` — full-screen pixel art subway car bitmap (rooftop disco scene)
+- `code.py`: bootstrap that runs `app.py` and reloads the board instead of halting on an error
+- `app.py`: main loop: buttons, screen cycle, fetches, display, watchdog
+- `layout.py`: screen layout shared by the board and the simulator
+- `logic.py`, `recovery.py`, `weather.py`: pure, desktop-tested logic
+- `diag.py`: serial diagnostics (screen dumps, status, fault injection)
+- `safemode.py`: automatic recovery from safe mode (brownouts)
+- `simulate_display.py`: desktop renderer, pixel-exact against the board
+- `tools/portal.py`: deploy and verify against the real board
+- `*-dashboard.bmp`, `weather-*.bmp`, `train.bmp`: bitmaps
 
-Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/) API (wraps MTA GTFS-RT), [NWS forecast API](https://api.weather.gov/) (no key required).
+Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/) API (wraps MTA GTFS-RT) and the [NWS forecast API](https://api.weather.gov/) (no key required).
 
 ## Design Decisions
 
-**Polling (30s)**: MTA feeds update ~30s — polling matches that cadence. Display shows whole minutes, so sub-30s precision doesn't help. Each fetch blocks the main loop (no threading in CircuitPython), so less polling = better button responsiveness.
+**Polling (30s)**: MTA feeds update ~30s. Each fetch blocks the main loop for about a second (no threading in CircuitPython), so the screen showing during a fetch stays up about a second longer; polling more often would make that worse.
 
-**Error recovery**: Network errors are common on microcontrollers. On failure, the board tries reconnecting WiFi, then resets the ESP32 chip, then reboots the entire board after 3 consecutive failures — recovering automatically without manual intervention.
+**Server time**: minutes are computed against the train API's own HTTP `Date` header, so the board needs no clock sync and no timezone setting.
 
-## Display Simulator
+**Error recovery**: a failed fetch retries after 5, 15, then 30s, rejoining WiFi if the link is down. If nothing succeeds for 3 minutes, the board reboots, which is the one reset that reliably clears ESP32 and socket state. Nothing ever gives up: outages just mean another retry or reboot until the network is back. Any unexpected exception soft-reloads the board instead of halting it, a 16s hardware watchdog catches hangs, and `safemode.py` resets out of safe mode after a brownout. Details: [docs/failure-modes.md](docs/failure-modes.md).
 
-Renders the LED matrix output as a PNG on desktop (requires Pillow):
-```bash
-python3 simulate_display.py                          # L train, placeholder times
-python3 simulate_display.py --line G --north 2,7,15 --south 4,9,20
-python3 simulate_display.py --weather --condition sun --temp 72
-```
-
-## Testing
+## Verification
 
 ```bash
-make setup    # once
-make test     # desktop: simulator vs board captures, layout rules
-make verify   # board on USB: capture its screen, diff against the simulator
+make test        # desktop: logic, recovery policy, layout rules, simulator vs board captures
+make test-live   # real train and weather APIs
+make deploy      # copy changed files to the board, wait for the first good fetch
+make verify      # capture every screen from the board, diff against the simulator
+make inject      # drop WiFi, crash, hang: each must recover on its own
+make soak        # optional: watch the board for hours (halts, data gaps, crashes, unexplained resets)
+make sim LED=1   # render screens as the LEDs show them (2 bits per color channel)
 ```
 
-Serial debug: `screen /dev/tty.usbmodem* 115200` — logs prefixed with `[OK]`, `[ERR]`, `[WEATHER]`, `[RECONNECT]`, `[RESET]`, `[BTN]`.
+`make verify` reads the board's actual framebuffer over USB serial, so "the simulator says it fits" and "the sign shows it" are the same claim. Serial log prefixes: `[BOOT]`, `[OK]`, `[ERR]`, `[RECONNECT]`, `[RESET]`, `[CRASH]`, `[WEATHER]`, `[BTN]`.

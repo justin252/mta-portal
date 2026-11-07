@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Simulate the MTA Portal 64x32 LED matrix display as a scaled PNG.
 
-Renders from layout.py (mirrors the positions code.py uses on the board) with the same
-BDF fonts and BMP bitmaps. Pixel-exact against board captures in test_fixtures/device/.
+Renders from layout.py (the same spec app.py builds the board's display from) with the
+same BDF fonts and BMP bitmaps. Pixel-exact against board captures in test_fixtures/device/.
 """
 
 import argparse

@@ -1,3 +1,4 @@
 pillow
 pytest
 pyserial
+certifi

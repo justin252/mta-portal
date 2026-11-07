@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
-"""portal - capture what the MatrixPortal is actually showing and diff it against the simulator.
+"""portal - verify the MatrixPortal sign against reality.
 
 Usage:
-  tools/portal.py verify [-o DIR] [--port PORT] [--from-file CAPTURE]   exit 1 on mismatch
-  tools/portal.py shot   [-o DIR] [--port PORT] [--from-file CAPTURE]   save device.png, state.json
+  tools/portal.py deploy  [--dry-run] [--reload]   copy changed files to CIRCUITPY, watch the boot
+  tools/portal.py verify  [--all] [-o DIR]         board framebuffer vs simulator; exit 1 on mismatch
+  tools/portal.py shot    [-o DIR]                 save what the board shows (device.png, state.json)
+  tools/portal.py status                           board status JSON
+  tools/portal.py logs    [--minutes N]            serial log with timestamps
+  tools/portal.py inject  wifi|crash|hang          fault injection; exit 0 if the board recovers
+  tools/portal.py soak    --minutes N              log, then summarize errors, resets, gaps, memory
 
-The board side is diag.py: sending 's' on the USB console makes it print the RGB565
-framebuffer plus the state (screen, label texts, bitmap) that produced it. verify
-re-renders that state with simulate_display.py and compares pixel by pixel.
+The board side is diag.py: one-letter commands on the USB console make it dump the RGB565
+framebuffer plus the state that produced it, report status, or inject a fault.
 """
 
 import argparse
 import glob
+import hashlib
 import json
 import os
+import re
+import shutil
 import sys
 import time
 
@@ -26,6 +33,23 @@ ADAFRUIT_VID = 0x239A
 SCALE = 10
 TEXT_X = 18  # labels start here; columns left of it are the line/weather bitmap
 SHIFTS = range(-2, 3)
+SCREENS = ('L', 'G', 'weather', 'train_art')
+DRIVES = ('/Volumes/CIRCUITPY', '/media/%s/CIRCUITPY' % os.getenv('USER', ''),
+          '/run/media/%s/CIRCUITPY' % os.getenv('USER', ''))
+# Everything the board runs, in copy order: code.py last, so the auto-reload its write
+# triggers starts the new code with every dependency already in place
+DEPLOY = (
+    'fonts/tom-thumb.bdf', 'fonts/spleen-5x8.bdf',
+    'l-dashboard.bmp', 'g-dashboard.bmp', 'train.bmp',
+    'weather-sun.bmp', 'weather-cloud.bmp', 'weather-rain.bmp',
+    'weather-snow.bmp', 'weather-storm.bmp', 'weather-fog.bmp',
+    'layout.py', 'logic.py', 'recovery.py', 'weather.py', 'diag.py', 'safemode.py', 'app.py',
+    'code.py',
+)
+MAX_DATA_GAP_S = 300  # soak fails if the board goes this long without a successful fetch
+HALT_AFTER_S = 30     # "Code done running" with no reload this long after it = halted board
+# CircuitPython sets the terminal title (OSC) and clears lines (CSI) inline with output
+ESCAPES = re.compile(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]')
 
 
 def die(msg, hint=None):
@@ -40,6 +64,11 @@ def say(msg):
 
 
 # --- pure helpers (tested in test_portal.py) ---
+
+def clean_line(raw):
+    """Decoded serial line without terminal escape codes or line endings."""
+    return ESCAPES.sub('', raw.decode('utf-8', 'replace')).rstrip('\r\n')
+
 
 def to_565(rgb):
     """RGB888 tuple -> RGB565 int, truncating like displayio's ColorConverter."""
@@ -139,6 +168,74 @@ def scaled(img):
     return img.resize((img.width * SCALE, img.height * SCALE), Image.NEAREST)
 
 
+def summarize(log):
+    """Soak verdict from (seconds, line) pairs. Returns (summary dict, list of failures)."""
+    s = {'ok': 0, 'errors': {}, 'reconnects': 0, 'resets': [], 'crashes': [], 'boots': [],
+         'unexplained_resets': [], 'weather_ok': 0, 'weather_failed': 0, 'halted': [],
+         'mem': [], 'fetch_s': []}
+    oks = []
+    last_reset_t = None
+    done_at = None  # time of the last "Code done running" not yet followed by a reload
+    for t, line in log:
+        if done_at is not None and t - done_at > HALT_AFTER_S:
+            s['halted'].append('Code done running at %ss, no reload after it' % done_at)
+            done_at = None
+        if line.startswith('[OK]'):
+            s['ok'] += 1
+            oks.append(t)
+            m = re.search(r' mem=(\d+)', line)
+            if m:
+                s['mem'].append(int(m.group(1)))
+        elif line.startswith('[ERR]'):
+            kind = line[len('[ERR] '):].split(':', 1)[0]
+            s['errors'][kind] = s['errors'].get(kind, 0) + 1
+        elif line.startswith('[RECONNECT] ok'):
+            s['reconnects'] += 1
+        elif line.startswith('[RESET]'):
+            s['resets'].append(line)
+            last_reset_t = t
+        elif line.startswith('[CRASH]'):
+            s['crashes'].append(line)
+        elif line.startswith('[BOOT] '):
+            # explained: a guarded crash reload, or a hard reset right after a policy [RESET];
+            # any other hard reset is the watchdog, a power drop, or the reset button
+            if 'run=STARTUP' in line and not (s['resets'] and t - last_reset_t < 60):
+                s['unexplained_resets'].append('%ss: %s' % (t, line))
+            s['boots'].append(line)
+            done_at = None
+        elif line.startswith('[WEATHER] failed'):
+            s['weather_failed'] += 1
+        elif line.startswith('[WEATHER]'):
+            s['weather_ok'] += 1
+        elif 'Code done running' in line:
+            done_at = t
+        elif line.startswith('soft reboot'):
+            done_at = None
+        m = re.search(r' t=([\d.]+)s', line)
+        if m:
+            s['fetch_s'].append(float(m.group(1)))
+    start = log[0][0] if log else 0
+    end = log[-1][0] if log else 0
+    if done_at is not None and end - done_at > HALT_AFTER_S:
+        s['halted'].append('Code done running at %ss, no reload after it' % done_at)
+    edges = [start] + oks + [end]
+    s['max_gap_s'] = round(max(b - a for a, b in zip(edges, edges[1:])), 1) if log else 0
+    s['minutes'] = round((end - start) / 60, 1)
+    failures = []
+    if s['halted']:
+        failures.append('board halted: %s' % s['halted'][0])
+    if s['max_gap_s'] > MAX_DATA_GAP_S:
+        failures.append('no fresh data for %ds (limit %ds)' % (s['max_gap_s'], MAX_DATA_GAP_S))
+    if not s['ok']:
+        failures.append('no successful fetch')
+    if s['unexplained_resets']:
+        failures.append('%d hard reset(s) with no logged cause (watchdog, power or button): %s'
+                        % (len(s['unexplained_resets']), s['unexplained_resets'][0]))
+    if s['crashes']:
+        failures.append('%d crash(es), recovered but a bug: %s' % (len(s['crashes']), s['crashes'][0]))
+    return s, failures
+
+
 # --- serial ---
 
 def find_port():
@@ -188,7 +285,7 @@ class Console:
             self.ser = None
             self.open(wait=60)
             return None
-        return raw.decode('utf-8', 'replace').rstrip('\r\n') or None
+        return clean_line(raw) or None
 
     def lines(self, seconds):
         """Yield lines for up to `seconds`."""
@@ -197,6 +294,24 @@ class Console:
             line = self.readline()
             if line is not None:
                 yield line
+
+    def wait_for(self, prefix, seconds, echo=True):
+        """First line starting with prefix within `seconds`, else None. Echoes other lines."""
+        for line in self.lines(seconds):
+            if line.startswith(prefix):
+                return line
+            if echo:
+                say('  | ' + line)
+        return None
+
+    def status(self):
+        for _ in range(2):  # a byte sent right after (re)opening the port can be lost: ask twice
+            self.ser.reset_input_buffer()
+            self.send(b'i')
+            line = self.wait_for('[STATUS] ', 10, echo=False)  # a fetch can block the loop a few seconds
+            if line:
+                return json.loads(line[len('[STATUS] '):])
+        die('no status reply', 'is the board halted or at the REPL? check `tools/portal.py logs`')
 
     def dump(self):
         """Framebuffer dump lines."""
@@ -271,14 +386,183 @@ def verify_capture(lines, out_dir, keep_capture=True):
     return len(mismatches)
 
 
+def goto(console, screen, tries=8):
+    """Drive the board to a screen with serial commands. False if it never shows."""
+    for _ in range(tries):
+        st = console.status()
+        if st['screen'] == screen:
+            return True
+        if screen == 'train_art' or st['view'] == 'train_art':
+            console.send(b'a')
+        elif screen == 'weather' and not st['weather_ok']:
+            return False
+        else:
+            console.send(b'n')
+        time.sleep(0.5)  # let the display refresh before looking again
+    return False
+
+
+def capture_screen(console, screen, out_dir, bitmap=None):
+    """goto + dump + verify, retrying when the 2s cycle moves on first. True if it matched."""
+    for _ in range(4):
+        if not goto(console, screen):
+            print('%s: never shown%s' % (out_dir, ' (no weather data yet)' if screen == 'weather' else ''))
+            return False
+        lines = console.dump()
+        state = parse_dump(lines)[0]
+        if state['screen'] == screen and (bitmap is None or state['bitmap'] == bitmap):
+            return verify_capture(lines, out_dir) == 0
+    print('%s: cycled away before every capture' % out_dir)
+    return False
+
+
 def cmd_verify(args):
-    return 1 if verify_capture(get_capture(args), args.output, not args.from_file) else 0
+    if args.from_file or not args.all:
+        return 1 if verify_capture(get_capture(args), args.output, not args.from_file) else 0
+    console = Console(args.port)
+    failed = [s for s in SCREENS if not capture_screen(console, s, os.path.join(args.output, s))]
+    if console.status()['view'] == 'train_art':
+        console.send(b'a')  # leave the sign cycling
+    total = len(SCREENS)
+    print('verified %d/%d screens%s' % (total - len(failed), total,
+                                        ', FAILED: ' + ', '.join(failed) if failed else ''))
+    return 1 if failed else 0
+
+
+def cmd_status(args):
+    print(json.dumps(Console(args.port).status(), indent=2))
+    return 0
+
+
+def cmd_logs(args):
+    console = Console(args.port)
+    start = time.monotonic()
+    for line in console.lines(args.minutes * 60 if args.minutes else 10 ** 9):
+        print('%7.1f %s' % (time.monotonic() - start, line), flush=True)
+    return 0
+
+
+INJECT = {
+    # fault: (command byte, log prefixes that must appear in order, seconds allowed)
+    'wifi': (b'w', ('[INJECT] dropping WiFi', '[RECONNECT] ok', '[OK]'), 120),
+    'crash': (b'x', ('[CRASH] RuntimeError: injected crash', '[BOOT] run=SUPERVISOR_RELOAD', '[OK]'), 120),
+    # a watchdog reset is a hard reset: the port drops and the board boots from scratch
+    'hang': (b'h', ('[INJECT] hanging', '[BOOT] run=STARTUP', '[OK]'), 120),
+}
+
+
+def cmd_inject(args):
+    cmd, steps, seconds = INJECT[args.fault]
+    console = Console(args.port)
+    console.ser.reset_input_buffer()
+    sent = time.monotonic()
+    console.send(cmd)
+    deadline = sent + seconds
+    for step in steps:
+        # the [BOOT] line can print before the port reopens after a hard reset: don't wait it out
+        wait = 45 if step.startswith('[BOOT]') else deadline - time.monotonic()
+        line = console.wait_for(step, max(0, min(wait, deadline - time.monotonic())))
+        if line is None and step.startswith('[BOOT]'):
+            st = console.status()
+            want = step[len('[BOOT] run='):]
+            if st['up'] <= time.monotonic() - sent and st['run'] == want:
+                print('  rebooted %ds ago (run=%s)' % (st['up'], st['run']))
+                continue
+        if line is None:
+            print('FAILED: no "%s" within %ds' % (step, seconds))
+            return 1
+        print('  ' + line)
+    print('recovered from %s' % args.fault)
+    return 0
+
+
+def cmd_soak(args):
+    console = Console(args.port)
+    os.makedirs(args.output, exist_ok=True)
+    path = os.path.join(args.output, 'soak-%s.log' % time.strftime('%Y%m%d-%H%M%S'))
+    start = time.monotonic()
+    log = []
+    say('soaking for %g min, logging to %s' % (args.minutes, path))
+    with open(path, 'w') as f:
+        for line in console.lines(args.minutes * 60):
+            t = round(time.monotonic() - start, 1)
+            log.append((t, line))
+            f.write('%7.1f %s\n' % (t, line))
+            f.flush()
+    summary, failures = summarize(log)
+    mem, fetch = summary.pop('mem'), summary.pop('fetch_s')
+    summary['mem_min_max'] = [min(mem), max(mem)] if mem else None
+    summary['fetch_s_max'] = max(fetch) if fetch else None
+    print(json.dumps(summary, indent=2))
+    print('FAIL: ' + '; '.join(failures) if failures else 'PASS')
+    return 1 if failures else 0
+
+
+def find_drive(arg):
+    for d in ([arg] if arg else DRIVES):
+        if d and os.path.isdir(d):
+            return d
+    die('CIRCUITPY drive not mounted', 'plug the board in with a data cable, or pass --drive')
+
+
+def sha1(path):
+    with open(path, 'rb') as f:
+        return hashlib.sha1(f.read()).hexdigest()
+
+
+def cmd_deploy(args):
+    drive = find_drive(args.drive)
+    changed = [p for p in DEPLOY if not os.path.exists(os.path.join(drive, p))
+               or sha1(os.path.join(ROOT, p)) != sha1(os.path.join(drive, p))]
+    for p in changed:
+        print(('would copy ' if args.dry_run else 'copy ') + p)
+    stray = sorted(os.path.basename(p) for p in glob.glob(os.path.join(drive, '*.py'))
+                   if os.path.basename(p) not in DEPLOY)
+    if stray:
+        say('warning: .py files on the board that deploy does not manage: %s' % ', '.join(stray))
+    if args.dry_run:
+        return 0
+    console = Console(args.port) if (args.port or find_port()) else None
+    if console:
+        console.ser.reset_input_buffer()
+    for p in changed:
+        dst = os.path.join(drive, p)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(os.path.join(ROOT, p), dst)  # copyfile: no macOS ._ metadata files
+        with open(dst, 'rb+') as f:
+            os.fsync(f.fileno())
+    os.sync()
+    bad = [p for p in changed if sha1(os.path.join(ROOT, p)) != sha1(os.path.join(drive, p))]
+    if bad:
+        die('verification failed after copy: %s' % ', '.join(bad), 'eject and replug the board, retry')
+    if not changed and not args.reload:
+        print('board already up to date')
+        return 0
+    if console is None:
+        say('copied; no serial port, so not watching the boot')
+        return 0
+    if args.reload:
+        console.send(b'\x03')  # Ctrl-C stops the app...
+        time.sleep(0.5)
+        console.send(b'\x04')  # ...Ctrl-D soft-reloads it
+    say('watching the boot (90s max)...')
+    for line in console.lines(90):
+        if line.startswith(('[BOOT]', '[OK]', '[ERR]', '[CRASH]', '[RECONNECT]', '[WEATHER]')):
+            print(line)
+        if line.startswith('[OK]'):
+            return 0
+        if line.startswith('[CRASH]') or 'Code done running' in line:
+            print('the new code crashed on boot; see `tools/portal.py logs`')
+            return 1
+    print('no [OK] within 90s; see `tools/portal.py logs`')
+    return 1
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog='portal', description='Capture the MatrixPortal framebuffer and diff it against the simulator.',
-        epilog='examples:\n  tools/portal.py verify\n  tools/portal.py shot -o out/l-screen',
+        prog='portal', description='Verify the MatrixPortal sign against reality.',
+        epilog='examples:\n  tools/portal.py deploy\n  tools/portal.py verify --all\n'
+               '  tools/portal.py inject wifi\n  tools/portal.py soak --minutes 480',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', metavar='command')
 
@@ -288,12 +572,26 @@ def main(argv=None):
         p.set_defaults(fn=fn)
         return p
 
+    p = add('deploy', cmd_deploy, 'copy changed files to CIRCUITPY, then watch the board boot')
+    p.add_argument('--drive', help='CIRCUITPY mount point (default: autodetect)')
+    p.add_argument('-n', '--dry-run', action='store_true', help='list what would be copied')
+    p.add_argument('--reload', action='store_true', help='restart the app even if nothing changed')
     for name, fn, help_text in (
             ('shot', cmd_shot, 'save what the board is showing (device.png, state.json)'),
             ('verify', cmd_verify, 'diff the board framebuffer against the simulator; exit 1 on mismatch')):
         p = add(name, fn, help_text)
         p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out'), help='output dir (default: out/)')
         p.add_argument('--from-file', metavar='CAPTURE', help='use a saved capture.txt instead of the board')
+        if name == 'verify':
+            p.add_argument('--all', action='store_true', help='drive the board through every screen')
+    add('status', cmd_status, 'print the board status JSON')
+    p = add('logs', cmd_logs, 'stream the serial log with timestamps')
+    p.add_argument('--minutes', type=float, help='stop after N minutes (default: until Ctrl-C)')
+    p = add('inject', cmd_inject, 'inject a fault; exit 0 if the board recovers on its own')
+    p.add_argument('fault', choices=sorted(INJECT))
+    p = add('soak', cmd_soak, 'log for N minutes, then pass/fail on halts, data gaps, crashes')
+    p.add_argument('--minutes', type=float, required=True)
+    p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out'), help='log dir (default: out/)')
 
     args = parser.parse_args(argv)
     if not args.command:
