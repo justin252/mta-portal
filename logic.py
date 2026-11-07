@@ -7,6 +7,7 @@ floats have ~22 bits of precision, far too few for epoch seconds.
 
 TRAIN_URL = 'https://api.wheresthefuckingtrain.com/by-id/%s'
 MAX_MINUTES = 99  # 3-digit minutes overflow the time row (test_layout.py)
+STALE_AFTER = 90  # seconds without a good fetch before arrivals are shown dimmed
 
 _MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
 
@@ -72,8 +73,14 @@ def parse_station(payload, route, now):
             arrival_minutes(station.get('S', []), route, now))
 
 
-def format_arrival_triple(minutes_list):
-    v0 = str(minutes_list[0]) if len(minutes_list) > 0 else '-'
-    v1 = str(minutes_list[1]) if len(minutes_list) > 1 else '-'
-    v2 = str(minutes_list[2]) if len(minutes_list) > 2 else '-'
-    return v0, v1, v2
+def times_text(minutes):
+    """Arrival row: up to three soonest, or 'No trains' when the API lists none."""
+    return ','.join(str(m) for m in minutes[:3]) if minutes else 'No trains'
+
+
+def freshness(has_data, age, failures):
+    """How live the arrival rows are: 'live', 'stale' (data too old), or with no data at
+    all, 'loading' (first fetch not back yet) or 'offline' (fetches failing)."""
+    if has_data:
+        return 'stale' if age > STALE_AFTER else 'live'
+    return 'offline' if failures else 'loading'

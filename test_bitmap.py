@@ -116,19 +116,24 @@ def test_letter_centered(train):
 
 # Committed bitmaps must be what their generator scripts produce: editing one without
 # regenerating the other ships art nobody reviewed. (The L/G dashboards need macOS Helvetica.)
-@pytest.mark.parametrize('name', ['sun', 'cloud', 'rain', 'snow', 'storm', 'fog'])
+WEATHER_ICONS = ['sun', 'moon', 'partly', 'partly_night', 'cloud', 'fog', 'drizzle', 'rain', 'showers',
+                 'sleet', 'snow', 'storm']
+
+
+@pytest.mark.parametrize('name', WEATHER_ICONS)
 def test_weather_icon_matches_generator(name, tmp_path, monkeypatch):
     import generate_weather_bitmaps
     monkeypatch.chdir(tmp_path)  # the generator writes into the current directory
     getattr(generate_weather_bitmaps, 'generate_' + name)()
-    filename = 'weather-%s.bmp' % name
+    filename = 'weather-%s.bmp' % name.replace('_', '-')
     generated = Image.open(tmp_path / filename).convert('RGB')
     assert generated.tobytes() == Image.open(os.path.join(BMP_DIR, filename)).convert('RGB').tobytes()
 
 
-def test_train_art_matches_generator(tmp_path):
-    import generate_train_bitmap
-    out = tmp_path / 'train.bmp'
-    generate_train_bitmap.create_train_art(str(out))
-    committed = Image.open(os.path.join(BMP_DIR, 'train.bmp')).convert('RGB')
+@pytest.mark.parametrize('name', ['train', 'skyline', 'bridge', 'rat'])
+def test_art_matches_generator(name, tmp_path):
+    import generate_art
+    out = tmp_path / ('art-%s.bmp' % name)
+    getattr(generate_art, 'create_' + name)(str(out))
+    committed = Image.open(os.path.join(BMP_DIR, 'art-%s.bmp' % name)).convert('RGB')
     assert Image.open(out).convert('RGB').tobytes() == committed.tobytes()

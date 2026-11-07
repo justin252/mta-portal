@@ -1,6 +1,7 @@
 """MatrixPortal M4 subway sign: cycles L arrivals, G arrivals and current weather.
 
-Buttons jump to L (UP) or G (DOWN); a long press toggles full-screen train art.
+UP toggles art mode (full-screen pixel art, cycling). DOWN returns to the transit
+screens (sports mode will live there).
 code.py imports this module and soft-reloads the board if anything escapes it.
 Every screen is drawn by apply(), from states built in screens.py: the same states the
 simulator renders. How each failure mode is guarded and verified: docs/failure-modes.md.
@@ -24,7 +25,7 @@ import diag
 import layout
 import scenarios
 import screens
-from logic import TRAIN_URL, parse_station, server_time
+from logic import TRAIN_URL, freshness, parse_station, server_time
 from recovery import Recovery, attempt
 from weather import WEATHER_URL, format_hi_lo, format_temperature, parse_weather
 
@@ -32,8 +33,10 @@ UPDATE_DELAY = 30           # train fetch interval (s); MTA feeds refresh about 
 WEATHER_UPDATE_DELAY = 900  # Open-Meteo current conditions change every 15 min
 WEATHER_RETRY_DELAY = 120   # after a failed weather fetch
 HOLD_TIMEOUT = 600          # a held scenario ends on its own if nobody releases it
-CYCLE_SECONDS = 2           # every screen gets the same time
-LONG_PRESS_MS = 1000
+# Long enough to read both directions (finding and reading six numbers takes ~2s), short
+# enough that the L screen is never more than ~7s away
+SCREEN_SECONDS = {'L': 4, 'G': 4, 'weather': 3}
+ART_SECONDS = 10            # art is ambient: linger
 HTTP_TIMEOUT = 5            # per socket operation (s); keeps one request inside the watchdog window
 WATCHDOG_TIMEOUT = 16       # SAMD51 maximum; if the loop stops feeding it, the board resets
 HEADERS = {'User-Agent': 'mta-portal'}
@@ -75,9 +78,10 @@ def build_screen(state, fields):
     return {'name': state['screen'], 'group': group, 'labels': labels, 'bitmap': state['bitmap']}
 
 
-cycle = [build_screen(screens.train_state(line, [], []), layout.TRAIN_FIELDS) for line in layout.LINES]
+cycle = [build_screen(screens.train_state(line, [], [], 'loading'), layout.TRAIN_FIELDS)
+         for line in layout.LINES]
 cycle.append(build_screen(screens.weather_placeholder(), layout.WEATHER_FIELDS))
-art = build_screen(screens.art_state(layout.TRAIN_ART), ())
+art = build_screen(screens.art_state(layout.ART[0]), ())
 by_name = {s['name']: s for s in cycle + [art]}
 
 
@@ -95,8 +99,9 @@ def apply(state):
             label.color = state['colors'][field]
 
 
-idx = 0
-view = 'cycle'          # 'cycle' or 'art'
+idx = 0                 # position in the transit cycle
+art_idx = 0             # position in layout.ART
+mode = 'transit'        # 'transit' (L, G, weather) or 'art'
 last_switch = now_ms()
 display.root_group = cycle[0]['group']
 
@@ -115,20 +120,28 @@ def next_screen():
     show(nxt)
 
 
-def toggle_art():
-    global view
-    if view == 'cycle':
-        view = 'art'
+def set_mode(new):
+    global mode, last_switch
+    mode = new
+    if mode == 'art':
+        apply(screens.art_state(layout.ART[art_idx]))
         display.root_group = art['group']
+        last_switch = now_ms()
     else:
-        view = 'cycle'
         show(idx)
-    print('[BTN] view=%s' % view)
+    print('[MODE] %s' % mode)
+
+
+def next_art():
+    global art_idx, last_switch
+    art_idx = (art_idx + 1) % len(layout.ART)
+    apply(screens.art_state(layout.ART[art_idx]))
+    last_switch = now_ms()
 
 
 def current_state():
     """What is on screen, read back from the live display objects (for diag dumps)."""
-    s = art if view == 'art' else cycle[idx]
+    s = art if mode == 'art' else cycle[idx]
     return {'screen': s['name'], 'bitmap': s['bitmap'],
             'texts': {f: label.text for f, label in s['labels'].items()},
             'colors': {f: label.color for f, label in s['labels'].items()}}
@@ -137,11 +150,12 @@ def current_state():
 # --- Live data ---
 live_trains = {}    # line -> (north, south) minutes from the last good fetch
 live_weather = None
+fresh = 'loading'   # logic.freshness() of live_trains, as last drawn
 
 
 def render_live():
     for line in layout.LINES:
-        apply(screens.train_state(line, *live_trains.get(line, ([], []))))
+        apply(screens.train_state(line, *live_trains.get(line, ([], [])), fresh))
     apply(screens.weather_state(live_weather) if live_weather else screens.weather_placeholder())
 
 
@@ -150,8 +164,18 @@ held = None         # scenario name while one is held
 held_until = 0
 
 
+def update_freshness():
+    """Redraw the arrival rows when they go stale, offline, or live again."""
+    global fresh
+    now = freshness(bool(live_trains), trains.age(now_s()), trains.failures)
+    if now != fresh:
+        fresh = now
+        if held is None:
+            render_live()
+
+
 def hold(name):
-    global held, held_until, view
+    global held, held_until, mode
     scenario = scenarios.BY_NAME.get(name)
     if scenario is None:
         print('[SCENE] unknown %r' % name)
@@ -159,23 +183,23 @@ def hold(name):
     state = scenarios.state(scenario)
     apply(state)
     if state['screen'] == 'art':
-        view = 'art'
+        mode = 'art'
         display.root_group = art['group']
     else:
-        view = 'cycle'
+        mode = 'transit'
         show([s['name'] for s in cycle].index(state['screen']))
     held, held_until = name, now_s() + HOLD_TIMEOUT
     print('[SCENE] %s' % name)
 
 
 def release():
-    global held, view
+    global held, mode
     if held is None:
         return
     held = None
     render_live()
-    apply(screens.art_state(layout.TRAIN_ART))
-    view = 'cycle'
+    apply(screens.art_state(layout.ART[art_idx]))
+    mode = 'transit'
     show(idx)
     print('[SCENE] back to live data')
 
@@ -224,7 +248,7 @@ def fetch_trains():
 def status():
     gc.collect()  # so 'mem' is what's actually free, not what's awaiting collection
     s = now_s()
-    diag.status({'view': view, 'screen': current_state()['screen'], 'held': held,
+    diag.status({'mode': mode, 'screen': current_state()['screen'], 'held': held, 'fresh': fresh,
                  'weather_ok': live_weather is not None, 'failures': trains.failures,
                  'age': trains.age(s), 'mem': gc.mem_free(), 'up': (now_ms() - boot_ms) // 1000,
                  'wifi': wifi.is_connected, 'run': diag.run_reason(), 'last_event': diag.recall()})
@@ -251,8 +275,8 @@ def hang():
 commands = {
     's': lambda arg: diag.dump(display, current_state()),
     'i': lambda arg: status(),
-    'n': lambda arg: toggle_art() if view == 'art' else next_screen(),
-    'a': lambda arg: toggle_art(),
+    'n': lambda arg: next_art() if mode == 'art' else next_screen(),
+    'a': lambda arg: set_mode('transit' if mode == 'art' else 'art'),
     'v': hold,
     'r': lambda arg: release(),
     'w': lambda arg: drop_wifi(),
@@ -267,7 +291,6 @@ button_up = Debouncer(button_up_pin)
 button_down_pin = digitalio.DigitalInOut(board.BUTTON_DOWN)
 button_down_pin.switch_to_input(pull=digitalio.Pull.UP)
 button_down = Debouncer(button_down_pin)
-button_press_ms = None
 
 # --- Main loop ---
 wdt = microcontroller.watchdog
@@ -284,23 +307,21 @@ while True:
     button_down.update()
 
     if button_up.fell or button_down.fell:
-        button_press_ms = now_ms()
-    if (button_up.rose or button_down.rose) and button_press_ms is not None:
-        pressed_ms = now_ms() - button_press_ms
-        button_press_ms = None
         release()  # any press ends a held scenario
-        if pressed_ms >= LONG_PRESS_MS or view == 'art':
-            toggle_art()  # long press toggles; any press leaves the art view
+        if button_up.fell:
+            set_mode('transit' if mode == 'art' else 'art')
         else:
-            target = 0 if button_up.rose else 1
-            if idx != target:
-                print('[BTN] %s -> %s' % ('UP' if button_up.rose else 'DOWN', cycle[target]['name']))
-                show(target)
+            set_mode('transit')  # sports mode goes on this button
 
     if held is not None and now_s() >= held_until:
         release()
-    if view == 'cycle' and held is None and now_ms() - last_switch > CYCLE_SECONDS * 1000:
-        next_screen()
+    if held is None:
+        elapsed = now_ms() - last_switch
+        if mode == 'transit' and elapsed > SCREEN_SECONDS[cycle[idx]['name']] * 1000:
+            next_screen()
+        elif mode == 'art' and elapsed > ART_SECONDS * 1000:
+            next_art()
+    update_freshness()
 
     if trains.due(now_s()):
         started = now_ms()
@@ -308,6 +329,7 @@ while True:
         took = (now_ms() - started) / 1000
         if err is None:
             live_trains = arrivals
+            update_freshness()  # before drawing, so new data never shows with the old state
             if held is None:
                 render_live()
             texts = [(line, screens.train_state(line, *arrivals[line])['texts']) for line in layout.LINES]

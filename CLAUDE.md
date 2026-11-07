@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-CircuitPython app for an Adafruit MatrixPortal M4 + 64x32 RGB LED matrix. Auto-cycles L train arrivals (Graham Av, stop L11), G train arrivals (Metropolitan Av, stop G29) and weather, 2 seconds each. Train data from `api.wheresthefuckingtrain.com`; weather (current condition icon + label, temperature, today's high/low) from Open-Meteo. UP/DOWN buttons jump to L/G; a long press toggles full-screen train art.
+CircuitPython app for an Adafruit MatrixPortal M4 + 64x32 RGB LED matrix. Auto-cycles L train arrivals (Graham Av, stop L11, 4s), G train arrivals (Metropolitan Av, stop G29, 4s) and weather (3s). Train data from `api.wheresthefuckingtrain.com`; weather (condition icon day/night + label, temperature, today's high/low) from Open-Meteo. UP toggles art mode (4 pieces, 10s each); DOWN returns to transit (sports mode will live there). Arrival rows show `Loading`/`Offline`/`No trains`, and dim when data is over 90s old: gold always means live.
 
 ## Verification loop (required)
 
@@ -57,6 +57,7 @@ Failure modes and the guard/test for each: `docs/failure-modes.md`.
 - `diag.py`: board-side serial commands, one per line (`s` dump, `i` status, `n` next screen, `a` art, `v NAME` hold a scenario, `r` back to live, `w`/`x`/`h` fault injection) and the NVM event record.
 - `safemode.py`: runs if CircuitPython enters safe mode (brownout, core fault); resets automatically after a 20s pause, every time.
 - `simulate_display.py`: desktop renderer from `layout.py` + the same fonts/bitmaps. `--led` quantizes to LED colors.
+- `generate_*.py`: make the bitmaps. Every lit pixel needs a channel ≥ 64 or it is black on the LEDs (`test_layout.py`); committed BMPs must match the generators (`test_bitmap.py`).
 - `tools/portal.py`: host CLI behind the make targets (deploy, verify, show, review, live, goldens, status, logs, inject, soak).
 - Serial log prefixes: `[BOOT]`, `[OK]`, `[ERR]`, `[RECONNECT]`, `[RESET]`, `[CRASH]`, `[WEATHER]`, `[BTN]`, `[INJECT]`.
 

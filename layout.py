@@ -32,4 +32,4 @@ STATIONS = {
     'L': {'stop_id': 'L11', 'north': 'Manhattan', 'south': 'Canarsie', 'bitmap': 'l-dashboard.bmp'},
     'G': {'stop_id': 'G29', 'north': 'Queens', 'south': 'Church Av', 'bitmap': 'g-dashboard.bmp'},
 }
-TRAIN_ART = 'train.bmp'
+ART = ('art-train.bmp', 'art-skyline.bmp', 'art-bridge.bmp', 'art-rat.bmp')  # art mode, in order

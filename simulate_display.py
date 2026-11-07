@@ -119,7 +119,7 @@ def render_screen(state):
     """Render a screen state (screens.py; also what the board reports in a dump)."""
     screen, texts = state['screen'], dict(state.get('texts', {}))
     if screen in ('art', 'train_art'):
-        return Image.open(os.path.join(SCRIPT_DIR, state.get('bitmap', layout.TRAIN_ART))).convert('RGB')
+        return Image.open(os.path.join(SCRIPT_DIR, state.get('bitmap', layout.ART[0]))).convert('RGB')
     if screen in STATIONS:
         station = STATIONS[screen]
         fields, bitmap = layout.TRAIN_FIELDS, state.get('bitmap', station['bitmap'])
@@ -186,7 +186,7 @@ def main():
     parser.add_argument('--line', choices=sorted(STATIONS), default='L')
     parser.add_argument('--north', default='3,8,14', help='Northbound arrival times')
     parser.add_argument('--south', default='1,5,12', help='Southbound arrival times')
-    parser.add_argument('--train', action='store_true', help='Show full-screen train bitmap')
+    parser.add_argument('--train', action='store_true', help='Show the first art piece (train)')
     parser.add_argument('--weather', action='store_true', help='Show weather screen')
     parser.add_argument('--code', type=int, default=3, help='WMO weather code (default 3, overcast)')
     parser.add_argument('--temp', type=float, default=42, help='Temperature in F')
@@ -205,7 +205,7 @@ def main():
         import scenarios
         canvas = render_screen(scenarios.state(scenarios.BY_NAME[args.scenario]))
     elif args.train:
-        canvas = render_screen({'screen': 'art', 'bitmap': layout.TRAIN_ART})
+        canvas = render_screen({'screen': 'art', 'bitmap': layout.ART[0]})
     elif args.weather:
         bitmap, label = map_condition(args.code)
         canvas = render_weather_display(bitmap, format_temperature(args.temp), label,

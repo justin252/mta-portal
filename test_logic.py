@@ -4,8 +4,8 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from logic import (MAX_MINUTES, arrival_minutes, days_from_civil, format_arrival_triple,
-                   http_date_to_epoch, iso_to_epoch, parse_station, server_time)
+from logic import (MAX_MINUTES, STALE_AFTER, arrival_minutes, days_from_civil, freshness,
+                   http_date_to_epoch, iso_to_epoch, parse_station, server_time, times_text)
 
 FIXTURES = os.path.join(os.path.dirname(__file__), 'test_fixtures')
 # Date header served with the saved train_*.json fixtures
@@ -148,18 +148,25 @@ class TestParseStation:
             parse_station(payload, 'L', self.NOW)
 
 
-class TestFormatArrivalTriple:
-    def test_three_values(self):
-        assert format_arrival_triple([10, 20, 30]) == ('10', '20', '30')
+class TestTimesText:
+    def test_three_soonest(self):
+        assert times_text([2, 6, 11, 15]) == '2,6,11'
 
-    def test_two_values(self):
-        assert format_arrival_triple([10, 20]) == ('10', '20', '-')
+    def test_fewer_than_three(self):
+        # no '-' padding: "4,12" reads better than "4,12,-"
+        assert times_text([4, 12]) == '4,12'
 
-    def test_one_value(self):
-        assert format_arrival_triple([10]) == ('10', '-', '-')
+    def test_none(self):
+        assert times_text([]) == 'No trains'
 
-    def test_empty(self):
-        assert format_arrival_triple([]) == ('-', '-', '-')
 
-    def test_more_than_three(self):
-        assert format_arrival_triple([10, 20, 30, 40]) == ('10', '20', '30')
+class TestFreshness:
+    @pytest.mark.parametrize('has_data,age,failures,expected', [
+        (True, 0, 0, 'live'),
+        (True, STALE_AFTER, 2, 'live'),
+        (True, STALE_AFTER + 1, 3, 'stale'),
+        (False, 5, 0, 'loading'),     # just booted, first fetch not back yet
+        (False, 40, 2, 'offline'),    # no data and fetches failing
+    ])
+    def test_states(self, has_data, age, failures, expected):
+        assert freshness(has_data, age, failures) == expected

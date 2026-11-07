@@ -7,7 +7,7 @@ import pytest
 import layout
 import scenarios
 from simulate_display import font, ink_right, render_screen
-from weather import CONDITIONS
+from weather import CONDITIONS, map_condition
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FIELDS = {f[0]: f for f in layout.TRAIN_FIELDS + layout.WEATHER_FIELDS}
@@ -23,7 +23,18 @@ def test_names_unique_and_indexed():
 def test_every_weather_design_has_a_scenario():
     shown = {(st['bitmap'], st['texts']['condition'])
              for st in map(scenarios.state, scenarios.SCENARIOS) if st['screen'] == 'weather'}
-    assert shown == {(c[2], c[3]) for c in CONDITIONS}
+    designs = {map_condition(c[0], day) for c in CONDITIONS for day in (True, False)}
+    assert shown == designs, 'missing: %s' % sorted(designs - shown)
+
+
+def test_every_art_piece_has_a_scenario():
+    shown = {scenarios.state(s)['bitmap'] for s in scenarios.SCENARIOS if 'art' in s}
+    assert shown == set(layout.ART)
+
+
+def test_every_train_state_has_a_scenario():
+    states = {s['train'][3] if len(s['train']) > 3 else 'live' for s in scenarios.SCENARIOS if 'train' in s}
+    assert states == {'live', 'stale', 'loading', 'offline'}
 
 
 def test_every_screen_kind_has_a_scenario():
