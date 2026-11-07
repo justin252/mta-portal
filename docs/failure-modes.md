@@ -26,7 +26,7 @@ What can go wrong with the sign, what guards against it, and the check that prov
 | Simulator drifts from the board (it drew all text 1px low and its own reference images agreed with it) | Board framebuffer captures are the reference images (`test_fixtures/device/`) | `test_simulate_display.py::test_matches_board_capture`; `make verify` |
 | Text clipped at the right edge (3-digit minutes) | Arrivals over 99 min are dropped | `test_layout.py` renders the widest strings with the real BDF metrics |
 | Character drawn as a gap (the degree sign in `spleen-5x8.bdf` was blank: "49 F") | Glyph drawn; tests require ink, not just a glyph entry | `test_layout.py` |
-| A weather icon that never appears in testing (it's only shown when it rains) | `weather.DEMO` has one fake reading per icon; diag command `c` shows them | `make verify` checks every icon on the board |
+| A design that never appears in testing (an icon only shown when it snows) | Every design is a scenario in `scenarios.py`; `tools/portal.py show NAME` holds it on the sign | `make verify` checks every scenario on the board; `test_scenarios.py` fails if a design has none |
 | Color invisible on the LEDs (bit depth 2 keeps only the top 2 bits per channel) | Text colors checked | `test_layout.py`; `make sim LED=1` shows art details that go black (about a quarter of the train art's lit pixels) |
 | Rows overlapping or off-screen | Rows computed from the Label placement formula | `test_layout.py` |
 | Bitmap crowding the text | Train logos keep 2 clear columns before the text at x=18; weather icons keep 5 before x=21 | `test_layout.py` |

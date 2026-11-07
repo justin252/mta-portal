@@ -7,7 +7,7 @@ from PIL import Image
 
 import layout
 from logic import MAX_MINUTES
-from simulate_display import font
+from simulate_display import font, ink_right
 from weather import CONDITIONS, DEFAULT_CONDITION, format_hi_lo, format_temperature
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -29,18 +29,6 @@ def worst_cases():
     for hi, lo in ((104, 88), (-10, -15), (99, -9), (61, 45)):
         cases.append(('hi_lo', format_hi_lo(hi, lo)))
     return cases
-
-
-def ink_right(fnt, text, x):
-    """One past the last lit column (trailing glyph spacing draws nothing)."""
-    right, cursor = x, x
-    for ch in text:
-        glyph = fnt['glyphs'][ord(ch)]
-        w, _, xoff, _ = glyph['bbx']
-        if any(glyph['bitmap']):
-            right = max(right, cursor + xoff + w)
-        cursor += glyph['dwidth']
-    return right
 
 
 @pytest.mark.parametrize('field,text', worst_cases())

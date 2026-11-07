@@ -1,12 +1,12 @@
 """Board-side diagnostics over the USB serial console. Device-only.
 
-tools/portal.py sends one-letter commands; app.py maps them to handlers and poll()
+tools/portal.py sends one command per line; app.py maps them to handlers and poll()
 runs them between main-loop passes:
-    s  screen dump    [FB] BEGIN {state} / [FB] <y> <hex RGB565 LE row> / [FB] END
-    i  status         [STATUS] {json}
-    n  next screen    a  toggle train art
-    c  hold the weather screen on the next fake reading (weather.DEMO)    r  back to live
-    w  drop WiFi      x  crash the main loop    h  hang (stop feeding the watchdog)
+    s         screen dump    [FB] BEGIN {state} / [FB] <y> <hex RGB565 LE row> / [FB] END
+    i         status         [STATUS] {json}
+    n         next screen    a  toggle train art
+    v NAME    hold a scenario from scenarios.py on the sign    r  back to live data
+    w         drop WiFi      x  crash the main loop    h  hang (stop feeding the watchdog)
 The last three are fault injection: each must end in recovery, never a halted board.
 
 NVM is flash that survives resets (write only on rare events): [1] event length, [2:] text.
@@ -22,14 +22,23 @@ import microcontroller
 import supervisor
 
 _EVENT_MAX = 60
+_line = ''  # command characters received so far
 
 
 def poll(commands):
-    """Run handlers for pending console bytes. Never blocks."""
+    """Run each complete command line ("s", "v weather-rain") as handler(arg). Never blocks."""
+    global _line
     while supervisor.runtime.serial_bytes_available:
-        handler = commands.get(sys.stdin.read(1))
+        ch = sys.stdin.read(1)
+        if ch not in '\r\n':
+            if len(_line) < 64:
+                _line += ch
+            continue
+        cmd, _, arg = _line.partition(' ')
+        _line = ''
+        handler = commands.get(cmd)
         if handler:
-            handler()
+            handler(arg)
 
 
 def dump(display, state):

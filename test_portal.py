@@ -182,3 +182,13 @@ def test_soak_flags_unexplained_hard_reset_but_not_policy_reset():
     assert len(summary['boots']) == 2
     assert summary['unexplained_resets'] == ["500s: [BOOT] run=STARTUP last_event='reset: no data 185s' mem=90000"]
     assert any('no logged cause' in f for f in failures)
+
+
+def test_golden_png_round_trips(tmp_path):
+    state, render = STATES['L']
+    lines = fake_dump(render(), state)
+    st, rows = portal.parse_dump(lines)
+    px = portal.decode_rgb565(rows)
+    path = tmp_path / 'L.png'
+    portal.save_golden(st, px, str(path))
+    assert portal.load_golden(str(path)) == (st, px)

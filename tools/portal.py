@@ -7,12 +7,15 @@ Usage:
   tools/portal.py shot    [-o DIR]                 save what the board shows (device.png, state.json)
   tools/portal.py status                           board status JSON
   tools/portal.py logs    [--minutes N]            serial log with timestamps
-  tools/portal.py demo    next|tour|live           fake weather readings on the sign, then back to live
+  tools/portal.py show    NAME                     hold a scenario on the sign, capture and verify it
+  tools/portal.py review                           walk every scenario on the sign (Enter for next)
+  tools/portal.py live                             end a held scenario: back to live data
+  tools/portal.py goldens                          capture every scenario as a reference image
   tools/portal.py inject  wifi|crash|hang          fault injection; exit 0 if the board recovers
   tools/portal.py soak    --minutes N              log, then summarize errors, resets, gaps, memory
 
-The board side is diag.py: one-letter commands on the USB console make it dump the RGB565
-framebuffer plus the state that produced it, report status, or inject a fault.
+The board side is diag.py: one command per line on the USB console makes it dump the RGB565
+framebuffer plus the state that produced it, hold a scenario, report status, or inject a fault.
 """
 
 import argparse
@@ -34,7 +37,7 @@ ADAFRUIT_VID = 0x239A
 SCALE = 10
 TEXT_X = 18  # labels start here; columns left of it are the line/weather bitmap
 SHIFTS = range(-2, 3)
-SCREENS = ('L', 'G', 'weather', 'train_art')
+GOLDENS = os.path.join(ROOT, 'test_fixtures', 'device')
 DRIVES = ('/Volumes/CIRCUITPY', '/media/%s/CIRCUITPY' % os.getenv('USER', ''),
           '/run/media/%s/CIRCUITPY' % os.getenv('USER', ''))
 # Everything the board runs, in copy order: code.py last, so the auto-reload its write
@@ -44,7 +47,8 @@ DEPLOY = (
     'l-dashboard.bmp', 'g-dashboard.bmp', 'train.bmp',
     'weather-sun.bmp', 'weather-cloud.bmp', 'weather-rain.bmp',
     'weather-snow.bmp', 'weather-storm.bmp', 'weather-fog.bmp',
-    'layout.py', 'logic.py', 'recovery.py', 'weather.py', 'diag.py', 'safemode.py', 'app.py',
+    'layout.py', 'logic.py', 'recovery.py', 'weather.py', 'screens.py', 'scenarios.py',
+    'diag.py', 'safemode.py', 'app.py',
     'code.py',
 )
 MAX_DATA_GAP_S = 300  # soak fails if the board goes this long without a successful fetch
@@ -169,6 +173,22 @@ def scaled(img):
     return img.resize((img.width * SCALE, img.height * SCALE), Image.NEAREST)
 
 
+def save_golden(state, device_px, path):
+    """Board capture as a PNG reference image, with the state that produced it embedded."""
+    from PIL.PngImagePlugin import PngInfo
+    meta = PngInfo()
+    meta.add_text('state', json.dumps(state, sort_keys=True))
+    device_image(device_px).save(path, pnginfo=meta)
+
+
+def load_golden(path):
+    """(state, device_px) from a reference PNG. from_565 -> to_565 round-trips exactly."""
+    img = Image.open(path)
+    rgb = img.convert('RGB')
+    w, h = rgb.size
+    return json.loads(img.text['state']), [[to_565(rgb.getpixel((x, y))) for x in range(w)] for y in range(h)]
+
+
 def summarize(log):
     """Soak verdict from (seconds, line) pairs. Returns (summary dict, list of failures)."""
     s = {'ok': 0, 'errors': {}, 'reconnects': 0, 'resets': [], 'crashes': [], 'boots': [],
@@ -276,6 +296,10 @@ class Console:
     def send(self, data):
         self.ser.write(data)
 
+    def cmd(self, line):
+        """One diag.py command; the board runs it when the newline arrives."""
+        self.ser.write((line + '\n').encode())
+
     def readline(self):
         """Next line, or None after 0.5s of silence. Survives the board resetting."""
         import serial
@@ -308,7 +332,7 @@ class Console:
     def status(self):
         for _ in range(2):  # a byte sent right after (re)opening the port can be lost: ask twice
             self.ser.reset_input_buffer()
-            self.send(b'i')
+            self.cmd('i')
             line = self.wait_for('[STATUS] ', 10, echo=False)  # a fetch can block the loop a few seconds
             if line:
                 return json.loads(line[len('[STATUS] '):])
@@ -317,7 +341,7 @@ class Console:
     def dump(self):
         """Framebuffer dump lines."""
         self.ser.reset_input_buffer()
-        self.send(b's')
+        self.cmd('s')
         lines, halted = [], False
         for line in self.lines(20):
             if not line.startswith('[FB]'):
@@ -387,56 +411,32 @@ def verify_capture(lines, out_dir, keep_capture=True):
     return len(mismatches)
 
 
-def goto(console, screen, tries=8):
-    """Drive the board to a screen with serial commands. False if it never shows."""
-    for _ in range(tries):
-        st = console.status()
-        if st['screen'] == screen:
-            return True
-        if screen == 'train_art' or st['view'] == 'train_art':
-            console.send(b'a')
-        elif screen == 'weather' and not st['weather_ok']:
-            return False
-        else:
-            console.send(b'n')
-        time.sleep(0.5)  # let the display refresh before looking again
-    return False
-
-
-def capture_screen(console, screen, out_dir, bitmap=None):
-    """goto + dump + verify, retrying when the 2s cycle moves on first. True if it matched."""
-    for _ in range(4):
-        if not goto(console, screen):
-            print('%s: never shown%s' % (out_dir, ' (no weather data yet)' if screen == 'weather' else ''))
-            return False
-        lines = console.dump()
-        state = parse_dump(lines)[0]
-        if state['screen'] == screen and (bitmap is None or state['bitmap'] == bitmap):
-            return verify_capture(lines, out_dir) == 0
-    print('%s: cycled away before every capture' % out_dir)
-    return False
+def show(console, name, out_root):
+    """Hold scenario NAME on the sign, capture it, diff against the simulator.
+    Returns (matched, out_dir)."""
+    console.ser.reset_input_buffer()
+    console.cmd('v ' + name)
+    line = console.wait_for('[SCENE] ', 20, echo=False)
+    if line != '[SCENE] ' + name:
+        die('board did not show %r (%s)' % (name, line or 'no reply'),
+            'deploy the current code (make deploy); names: tools/portal.py scenarios')
+    time.sleep(0.5)  # let the display refresh before capturing it
+    out_dir = os.path.join(out_root, name)
+    return verify_capture(console.dump(), out_dir) == 0, out_dir
 
 
 def cmd_verify(args):
     if args.from_file or not args.all:
         return 1 if verify_capture(get_capture(args), args.output, not args.from_file) else 0
-    from weather import DEMO, map_condition
+    import scenarios
     console = Console(args.port)
-    failed = [s for s in SCREENS if not capture_screen(console, s, os.path.join(args.output, s))]
-    # Every weather scenario and the widest strings, via the board's demo mode ('c')
-    for reading in DEMO:
-        name = 'weather-demo-%d' % reading['code']
-        console.ser.reset_input_buffer()
-        console.send(b'c')
-        if not (console.wait_for('[DEMO]', 20, echo=False) and capture_screen(
-                console, 'weather', os.path.join(args.output, name), map_condition(reading['code'])[0])):
-            failed.append(name)
-    console.send(b'r')  # back to live weather
-    if console.status()['view'] == 'train_art':
-        console.send(b'a')  # leave the sign cycling
-    total = len(SCREENS) + len(DEMO)
-    print('verified %d/%d screens%s' % (total - len(failed), total,
-                                        ', FAILED: ' + ', '.join(failed) if failed else ''))
+    try:
+        failed = [sc['name'] for sc in scenarios.SCENARIOS if not show(console, sc['name'], args.output)[0]]
+    finally:
+        console.cmd('r')  # back to live data
+    total = len(scenarios.SCENARIOS)
+    print('verified %d/%d scenarios%s' % (total - len(failed), total,
+                                          ', FAILED: ' + ', '.join(failed) if failed else ''))
     return 1 if failed else 0
 
 
@@ -452,42 +452,71 @@ def contact_sheet(paths, out_path, cols=2):
     return out_path
 
 
-def cmd_demo(args):
+def cmd_show(args):
+    import scenarios
+    if args.name not in scenarios.BY_NAME:
+        die('unknown scenario %r' % args.name, 'list them: tools/portal.py scenarios')
+    matched, out_dir = show(Console(args.port), args.name, args.output)
+    print('%s: %s' % (args.name, scenarios.BY_NAME[args.name]['about']))
+    print(os.path.join(out_dir, 'device_x10.png'))
+    print('holding it on the sign; `tools/portal.py live` (or any button) returns to live data')
+    return 0 if matched else 1
+
+
+def cmd_review(args):
+    """Design review on the real sign: one scenario at a time, Enter for the next."""
+    import scenarios
     console = Console(args.port)
-    if args.action == 'live':
-        console.ser.reset_input_buffer()
-        console.send(b'r')
-        line = console.wait_for('[WEATHER]', 30, echo=False)
-        print('live: ' + (line[len('[WEATHER] '):] if line else 'weather fetch pending'))
-        return 0
-    from weather import DEMO
-    shots, mismatched = [], []
-    for _ in range(len(DEMO) if args.action == 'tour' else 1):
-        console.ser.reset_input_buffer()
-        console.send(b'c')
-        line = console.wait_for('[DEMO]', 20, echo=False)
-        if not line:
-            die('no [DEMO] reply from the board', 'deploy the current app.py: make deploy')
-        print(line[len('[DEMO] '):], flush=True)
-        out_dir = os.path.join(args.output, line.split()[1].split('/')[0])
-        time.sleep(0.5)  # let the display refresh before capturing it
-        with open(os.devnull, 'w') as quiet:  # verify_capture is chatty; just collect the verdict
-            stdout, sys.stdout = sys.stdout, quiet
-            try:
-                if verify_capture(console.dump(), out_dir):
-                    mismatched.append(out_dir)
-            finally:
-                sys.stdout = stdout
-        shots.append(os.path.join(out_dir, 'device_x10.png'))
-        if args.action == 'tour':
-            time.sleep(args.seconds)
-    if args.action == 'tour':
-        print('board captures: ' + contact_sheet(shots, os.path.join(args.output, 'sheet.png')))
-    for d in mismatched:
-        print('simulator mismatch: ' + d)
-    print('holding this reading; `tools/portal.py demo live` or any button returns to live data '
-          '(it also times out after 10 min)')
-    return 1 if mismatched else 0
+    shots = []
+    try:
+        for n, sc in enumerate(scenarios.SCENARIOS, 1):
+            matched, out_dir = show(console, sc['name'], args.output)
+            shots.append(os.path.join(out_dir, 'device_x10.png'))
+            print('[%d/%d] %s: %s%s' % (n, len(scenarios.SCENARIOS), sc['name'], sc['about'],
+                                        '' if matched else '  (SIMULATOR MISMATCH)'))
+            if input('Enter for next, q to stop: ').strip().lower() == 'q':
+                break
+    finally:
+        console.cmd('r')
+    print('board captures: ' + contact_sheet(shots, os.path.join(args.output, 'sheet.png')))
+    return 0
+
+
+def cmd_live(args):
+    console = Console(args.port)
+    console.ser.reset_input_buffer()
+    console.cmd('r')
+    line = console.wait_for('[SCENE] back to live data', 10, echo=False)
+    print('live data' if line else 'nothing was held')
+    return 0
+
+
+def cmd_scenarios(args):
+    import scenarios
+    for sc in scenarios.SCENARIOS:
+        print('%-20s %s' % (sc['name'], sc['about']))
+    return 0
+
+
+def cmd_goldens(args):
+    """Capture every scenario from the board into test_fixtures/device/<name>.png."""
+    import scenarios
+    console = Console(args.port)
+    os.makedirs(GOLDENS, exist_ok=True)
+    try:
+        for sc in scenarios.SCENARIOS:
+            console.ser.reset_input_buffer()
+            console.cmd('v ' + sc['name'])
+            if console.wait_for('[SCENE] ' + sc['name'], 20, echo=False) is None:
+                die('board did not show %r' % sc['name'], 'deploy the current code: make deploy')
+            time.sleep(0.5)
+            state, rows = parse_dump(console.dump())
+            path = os.path.join(GOLDENS, sc['name'] + '.png')
+            save_golden(state, decode_rgb565(rows), path)
+            print(path)
+    finally:
+        console.cmd('r')
+    return 0
 
 
 def cmd_status(args):
@@ -505,10 +534,10 @@ def cmd_logs(args):
 
 INJECT = {
     # fault: (command byte, log prefixes that must appear in order, seconds allowed)
-    'wifi': (b'w', ('[INJECT] dropping WiFi', '[RECONNECT] ok', '[OK]'), 120),
-    'crash': (b'x', ('[CRASH] RuntimeError: injected crash', '[BOOT] run=SUPERVISOR_RELOAD', '[OK]'), 120),
+    'wifi': ('w', ('[INJECT] dropping WiFi', '[RECONNECT] ok', '[OK]'), 120),
+    'crash': ('x', ('[CRASH] RuntimeError: injected crash', '[BOOT] run=SUPERVISOR_RELOAD', '[OK]'), 120),
     # a watchdog reset is a hard reset: the port drops and the board boots from scratch
-    'hang': (b'h', ('[INJECT] hanging', '[BOOT] run=STARTUP', '[OK]'), 120),
+    'hang': ('h', ('[INJECT] hanging', '[BOOT] run=STARTUP', '[OK]'), 120),
 }
 
 
@@ -517,7 +546,7 @@ def cmd_inject(args):
     console = Console(args.port)
     console.ser.reset_input_buffer()
     sent = time.monotonic()
-    console.send(cmd)
+    console.cmd(cmd)
     deadline = sent + seconds
     for step in steps:
         # the [BOOT] line can print before the port reopens after a hard reset: don't wait it out
@@ -644,14 +673,18 @@ def main(argv=None):
         p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out'), help='output dir (default: out/)')
         p.add_argument('--from-file', metavar='CAPTURE', help='use a saved capture.txt instead of the board')
         if name == 'verify':
-            p.add_argument('--all', action='store_true', help='drive the board through every screen')
+            p.add_argument('--all', action='store_true', help='every scenario in scenarios.py, on the board')
     add('status', cmd_status, 'print the board status JSON')
     p = add('logs', cmd_logs, 'stream the serial log with timestamps')
     p.add_argument('--minutes', type=float, help='stop after N minutes (default: until Ctrl-C)')
-    p = add('demo', cmd_demo, 'hold the weather screen on fake readings: next, tour (all), live (revert)')
-    p.add_argument('action', choices=('next', 'tour', 'live'))
-    p.add_argument('--seconds', type=float, default=5, help='tour: seconds per reading (default 5)')
-    p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out', 'demo'), help='captures (default: out/demo/)')
+    p = add('show', cmd_show, 'hold a scenario on the sign, capture it and diff against the simulator')
+    p.add_argument('name')
+    p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out', 'scenes'), help='captures (default: out/scenes/)')
+    p = add('review', cmd_review, 'walk every scenario on the sign, Enter for the next')
+    p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out', 'scenes'), help='captures (default: out/scenes/)')
+    add('live', cmd_live, 'end a held scenario: back to live data')
+    add('scenarios', cmd_scenarios, 'list the scenarios')
+    add('goldens', cmd_goldens, 'capture every scenario into test_fixtures/device/ as reference images')
     p = add('inject', cmd_inject, 'inject a fault; exit 0 if the board recovers on its own')
     p.add_argument('fault', choices=sorted(INJECT))
     p = add('soak', cmd_soak, 'log for N minutes, then pass/fail on halts, data gaps, crashes')

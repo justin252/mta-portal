@@ -26,22 +26,6 @@ CONDITIONS = (
 )
 DEFAULT_CONDITION = ('weather-cloud.bmp', 'Cloudy')
 
-# Fake readings for the demo mode (diag 'c'): one per (icon, label) the board can show,
-# spread across the widest temperature strings. `tools/portal.py verify --all` walks them
-DEMO = (
-    {'code': 0, 'temp_f': 72.4, 'hi_f': 81, 'lo_f': 65},
-    {'code': 2, 'temp_f': 58, 'hi_f': 63, 'lo_f': 50},
-    {'code': 3, 'temp_f': -9.6, 'hi_f': -2, 'lo_f': -15},
-    {'code': 45, 'temp_f': 51, 'hi_f': 55, 'lo_f': 48},
-    {'code': 53, 'temp_f': 47, 'hi_f': 52, 'lo_f': 44},
-    {'code': 63, 'temp_f': 63, 'hi_f': 68, 'lo_f': 57},
-    {'code': 81, 'temp_f': 66, 'hi_f': 74, 'lo_f': 61},
-    {'code': 66, 'temp_f': 31, 'hi_f': 34, 'lo_f': 27},
-    {'code': 73, 'temp_f': 28, 'hi_f': 31, 'lo_f': 19},
-    {'code': 95, 'temp_f': 100.2, 'hi_f': 104, 'lo_f': 88},
-)
-
-
 def parse_weather(data):
     """Open-Meteo response -> {'temp_f', 'code', 'hi_f', 'lo_f'}. Raises on unexpected shape."""
     current, daily = data['current'], data['daily']
