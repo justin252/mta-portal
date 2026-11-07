@@ -8,7 +8,7 @@ Real-time NYC subway arrivals + weather on a 64x32 RGB LED matrix ([Adafruit Mat
 2. Copy [CircuitPython Bundle](https://circuitpython.org/libraries) libs to `/lib`: `adafruit_matrixportal`, `adafruit_display_text`, `adafruit_bitmap_font`, `adafruit_datetime`, `adafruit_debouncer`
 3. Deploy to board:
 ```bash
-cp boot.py code.py logic.py weather.py *.bmp /Volumes/CIRCUITPY/ && cp -r fonts /Volumes/CIRCUITPY/
+cp code.py diag.py logic.py weather.py *.bmp /Volumes/CIRCUITPY/ && cp -r fonts /Volumes/CIRCUITPY/
 ```
 
 Board auto-reloads on file save.
@@ -28,8 +28,9 @@ Display auto-cycles: **L train → G train → weather → repeat** (10s per scr
 - `code.py` — main loop: fetch → parse → display (on-device only)
 - `logic.py` — pure functions for time parsing/filtering (desktop-testable)
 - `weather.py` — pure functions for NWS weather parsing (desktop-testable)
-- `simulate_display.py` — desktop display simulator (outputs scaled PNG)
-- `boot.py` — enables filesystem writes for persistent train state
+- `simulate_display.py` — desktop display simulator (outputs scaled PNG), pixel-exact against the board
+- `layout.py` — screen positions, fonts and colors for the simulator
+- `diag.py`, `tools/portal.py` — capture the board's actual screen over USB and diff it against the simulator
 - `*-dashboard.bmp` — pre-rendered line name/color bitmaps
 - `weather-*.bmp` — weather icon bitmaps (sun/cloud/rain/snow/storm/fog)
 - `train.bmp` — full-screen pixel art subway car bitmap (rooftop disco scene)
@@ -54,7 +55,9 @@ python3 simulate_display.py --weather --condition sun --temp 72
 ## Testing
 
 ```bash
-cd /tmp && python3 -m pytest ~/code/mta-portal/test_logic.py ~/code/mta-portal/test_simulate_display.py ~/code/mta-portal/test_weather.py -v
+make setup    # once
+make test     # desktop: simulator vs board captures, layout rules
+make verify   # board on USB: capture its screen, diff against the simulator
 ```
 
 Serial debug: `screen /dev/tty.usbmodem* 115200` — logs prefixed with `[OK]`, `[ERR]`, `[WEATHER]`, `[RECONNECT]`, `[RESET]`, `[BTN]`.
