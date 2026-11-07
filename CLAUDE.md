@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-CircuitPython app for an Adafruit MatrixPortal M4 + 64x32 RGB LED matrix. Auto-cycles L train arrivals (Graham Av, stop L11, 5s), G train arrivals (Metropolitan Av, stop G29, 2s) and weather (10s). Train data from `api.wheresthefuckingtrain.com`, weather from the NWS forecast API. UP/DOWN buttons jump to L/G; a long press toggles full-screen train art.
+CircuitPython app for an Adafruit MatrixPortal M4 + 64x32 RGB LED matrix. Auto-cycles L train arrivals (Graham Av, stop L11), G train arrivals (Metropolitan Av, stop G29) and weather, 2 seconds each. Train data from `api.wheresthefuckingtrain.com`; weather (current condition icon + label, temperature, today's high/low) from Open-Meteo. UP/DOWN buttons jump to L/G; a long press toggles full-screen train art.
 
 ## Verification loop (required)
 
@@ -15,9 +15,11 @@ Every change is checked against what the board actually renders, not just agains
 | Any change | `make test` | logic, recovery policy, layout rules, simulator == board captures, deploy list complete |
 | API or URL change | `make test-live` | endpoints answer 200 with the expected shape |
 | Anything that runs on the board | `make deploy` | copies changed files, waits for the first `[OK]` |
-| Display change | `make verify` | each screen's framebuffer captured from the board matches the simulator pixel for pixel |
+| Display change | `make verify` | each screen, plus every weather icon via fake readings (`weather.DEMO`), captured from the board matches the simulator pixel for pixel |
 | Network or error-handling change | `make inject` | WiFi drop, crash and hang each recover on their own |
 | Optional, after network changes | `make soak MINUTES=480` | hours without halts, data gaps, crashes or unexplained resets |
+
+To look at weather scenarios on the sign: `make demo` (fake readings, one per icon/label), then `make live`. Demo mode also ends on any button press or after 10 min.
 
 First time: `make setup`. Outputs go to `out/` (gitignored). Read the PNGs in `out/<screen>/` (`device_x10.png`, `sim_x10.png`, `diff.png`) when `verify` fails.
 
@@ -40,11 +42,11 @@ Failure modes and the guard/test for each: `docs/failure-modes.md`.
 - `layout.py`: screen layout shared by `app.py` and the simulator (positions, fonts, colors, stations).
 - `logic.py`: pure: date math, arrival parsing/formatting.
 - `recovery.py`: pure: retry/reboot policy and `attempt()`, the catch-all fetch boundary.
-- `weather.py`: pure: NWS forecast parsing, icon URL → bitmap/label.
-- `diag.py`: board-side serial commands (`s` dump, `i` status, `n` next screen, `a` art, `w`/`x`/`h` fault injection) and the NVM event record.
+- `weather.py`: pure: Open-Meteo parsing (current + today's high/low), WMO code → icon/label, `DEMO` readings covering every icon.
+- `diag.py`: board-side serial commands (`s` dump, `i` status, `n` next screen, `a` art, `c` next fake weather reading, `w`/`x`/`h` fault injection) and the NVM event record.
 - `safemode.py`: runs if CircuitPython enters safe mode (brownout, core fault); resets automatically after a 20s pause, every time.
 - `simulate_display.py`: desktop renderer from `layout.py` + the same fonts/bitmaps. `--led` quantizes to LED colors.
-- `tools/portal.py`: host CLI behind the make targets (deploy, verify, status, logs, inject, soak).
+- `tools/portal.py`: host CLI behind the make targets (deploy, verify, status, logs, demo, inject, soak).
 - Serial log prefixes: `[BOOT]`, `[OK]`, `[ERR]`, `[RECONNECT]`, `[RESET]`, `[CRASH]`, `[WEATHER]`, `[BTN]`, `[INJECT]`.
 
 ## Board

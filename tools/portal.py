@@ -7,6 +7,7 @@ Usage:
   tools/portal.py shot    [-o DIR]                 save what the board shows (device.png, state.json)
   tools/portal.py status                           board status JSON
   tools/portal.py logs    [--minutes N]            serial log with timestamps
+  tools/portal.py demo    next|tour|live           fake weather readings on the sign, then back to live
   tools/portal.py inject  wifi|crash|hang          fault injection; exit 0 if the board recovers
   tools/portal.py soak    --minutes N              log, then summarize errors, resets, gaps, memory
 
@@ -419,14 +420,74 @@ def capture_screen(console, screen, out_dir, bitmap=None):
 def cmd_verify(args):
     if args.from_file or not args.all:
         return 1 if verify_capture(get_capture(args), args.output, not args.from_file) else 0
+    from weather import DEMO, map_condition
     console = Console(args.port)
     failed = [s for s in SCREENS if not capture_screen(console, s, os.path.join(args.output, s))]
+    # Every weather scenario and the widest strings, via the board's demo mode ('c')
+    for reading in DEMO:
+        name = 'weather-demo-%d' % reading['code']
+        console.ser.reset_input_buffer()
+        console.send(b'c')
+        if not (console.wait_for('[DEMO]', 20, echo=False) and capture_screen(
+                console, 'weather', os.path.join(args.output, name), map_condition(reading['code'])[0])):
+            failed.append(name)
+    console.send(b'r')  # back to live weather
     if console.status()['view'] == 'train_art':
         console.send(b'a')  # leave the sign cycling
-    total = len(SCREENS)
+    total = len(SCREENS) + len(DEMO)
     print('verified %d/%d screens%s' % (total - len(failed), total,
                                         ', FAILED: ' + ', '.join(failed) if failed else ''))
     return 1 if failed else 0
+
+
+def contact_sheet(paths, out_path, cols=2):
+    """Grid of board captures, for looking at many screens at once."""
+    imgs = [Image.open(p) for p in paths]
+    w, h = imgs[0].size
+    rows = (len(imgs) + cols - 1) // cols
+    sheet = Image.new('RGB', (cols * (w + 10) - 10, rows * (h + 10) - 10), (60, 60, 60))
+    for i, img in enumerate(imgs):
+        sheet.paste(img, ((i % cols) * (w + 10), (i // cols) * (h + 10)))
+    sheet.save(out_path)
+    return out_path
+
+
+def cmd_demo(args):
+    console = Console(args.port)
+    if args.action == 'live':
+        console.ser.reset_input_buffer()
+        console.send(b'r')
+        line = console.wait_for('[WEATHER]', 30, echo=False)
+        print('live: ' + (line[len('[WEATHER] '):] if line else 'weather fetch pending'))
+        return 0
+    from weather import DEMO
+    shots, mismatched = [], []
+    for _ in range(len(DEMO) if args.action == 'tour' else 1):
+        console.ser.reset_input_buffer()
+        console.send(b'c')
+        line = console.wait_for('[DEMO]', 20, echo=False)
+        if not line:
+            die('no [DEMO] reply from the board', 'deploy the current app.py: make deploy')
+        print(line[len('[DEMO] '):], flush=True)
+        out_dir = os.path.join(args.output, line.split()[1].split('/')[0])
+        time.sleep(0.5)  # let the display refresh before capturing it
+        with open(os.devnull, 'w') as quiet:  # verify_capture is chatty; just collect the verdict
+            stdout, sys.stdout = sys.stdout, quiet
+            try:
+                if verify_capture(console.dump(), out_dir):
+                    mismatched.append(out_dir)
+            finally:
+                sys.stdout = stdout
+        shots.append(os.path.join(out_dir, 'device_x10.png'))
+        if args.action == 'tour':
+            time.sleep(args.seconds)
+    if args.action == 'tour':
+        print('board captures: ' + contact_sheet(shots, os.path.join(args.output, 'sheet.png')))
+    for d in mismatched:
+        print('simulator mismatch: ' + d)
+    print('holding this reading; `tools/portal.py demo live` or any button returns to live data '
+          '(it also times out after 10 min)')
+    return 1 if mismatched else 0
 
 
 def cmd_status(args):
@@ -587,6 +648,10 @@ def main(argv=None):
     add('status', cmd_status, 'print the board status JSON')
     p = add('logs', cmd_logs, 'stream the serial log with timestamps')
     p.add_argument('--minutes', type=float, help='stop after N minutes (default: until Ctrl-C)')
+    p = add('demo', cmd_demo, 'hold the weather screen on fake readings: next, tour (all), live (revert)')
+    p.add_argument('action', choices=('next', 'tour', 'live'))
+    p.add_argument('--seconds', type=float, default=5, help='tour: seconds per reading (default 5)')
+    p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out', 'demo'), help='captures (default: out/demo/)')
     p = add('inject', cmd_inject, 'inject a fault; exit 0 if the board recovers on its own')
     p.add_argument('fault', choices=sorted(INJECT))
     p = add('soak', cmd_soak, 'log for N minutes, then pass/fail on halts, data gaps, crashes')

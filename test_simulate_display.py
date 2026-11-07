@@ -93,12 +93,12 @@ class TestWeatherPixelSpotChecks:
         self.img = render_weather_display('cloud', format_temperature(42), 'Cloudy')
 
     def test_condition_label_pixel(self):
-        # 'C' in 'Cloudy', tom-thumb at x=18 y=10: top = 10 - 5 - 0 + 5//2 = 7, C starts 1px in
-        assert self.img.getpixel((19, 7)) == (0x44, 0x44, 0x44)
+        # 'C' in 'Cloudy', tom-thumb at x=21 y=6: top = 6 - 5 - 0 + 5//2 = 3, C starts 1px in
+        assert self.img.getpixel((22, 3)) == (0x44, 0x44, 0x44)
 
     def test_temp_pixel(self):
-        # '4' in '42°F', spleen at x=18 y=22: top = 22 - 8 + 1 + 7//2 = 18, row 1 is lit
-        assert self.img.getpixel((18, 19)) == (0xDD, 0x80, 0x00)
+        # '4' in '42°F', spleen at x=21 y=16: top = 16 - 8 + 1 + 7//2 = 12, row 1 is lit
+        assert self.img.getpixel((21, 13)) == (0xDD, 0x80, 0x00)
 
     def test_weather_bitmap_present(self):
         # Cloud bitmap should have non-black pixels in left 18px

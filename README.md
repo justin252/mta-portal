@@ -11,7 +11,9 @@ Real-time NYC subway arrivals + weather on a 64x32 RGB LED matrix ([Adafruit Mat
 
 ## Usage
 
-Display auto-cycles **L train (5s) → G train (2s) → weather (10s)**. The weather screen joins once the first weather fetch succeeds.
+Display auto-cycles **L train → G train → weather**, 2 seconds each. The weather screen joins once the first weather fetch succeeds.
+
+The weather screen shows an icon for the current condition (sun, cloud, fog, rain, snow, storm), the condition name, the current temperature, and today's high and low (`H:61 L:45`).
 
 - **Short press UP / DOWN**: jump to the L / G screen
 - **Long press (1s) either button**: toggle full-screen pixel art train view
@@ -29,7 +31,7 @@ Display auto-cycles **L train (5s) → G train (2s) → weather (10s)**. The wea
 - `tools/portal.py`: deploy and verify against the real board
 - `*-dashboard.bmp`, `weather-*.bmp`, `train.bmp`: bitmaps
 
-Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/) API (wraps MTA GTFS-RT) and the [NWS forecast API](https://api.weather.gov/) (no key required).
+Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/) API (wraps MTA GTFS-RT) and [Open-Meteo](https://open-meteo.com/) current conditions and today's high/low (no key required).
 
 ## Design Decisions
 
@@ -45,7 +47,8 @@ Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/
 make test        # desktop: logic, recovery policy, layout rules, simulator vs board captures
 make test-live   # real train and weather APIs
 make deploy      # copy changed files to the board, wait for the first good fetch
-make verify      # capture every screen from the board, diff against the simulator
+make verify      # capture every screen (and every weather icon) from the board, diff against the simulator
+make demo        # show every weather scenario on the sign with fake readings; `make live` to go back
 make inject      # drop WiFi, crash, hang: each must recover on its own
 make soak        # optional: watch the board for hours (halts, data gaps, crashes, unexplained resets)
 make sim LED=1   # render screens as the LEDs show them (2 bits per color channel)

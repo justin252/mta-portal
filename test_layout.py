@@ -8,7 +8,7 @@ from PIL import Image
 import layout
 from logic import MAX_MINUTES
 from simulate_display import font
-from weather import CONDITION_MAP, DEFAULT_CONDITION, format_temperature
+from weather import CONDITIONS, DEFAULT_CONDITION, format_hi_lo, format_temperature
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FIELDS = {field: (role, x, y) for field, role, x, y in layout.TRAIN_FIELDS + layout.WEATHER_FIELDS}
@@ -22,10 +22,12 @@ def worst_cases():
     widest = '%d,%d,%d' % ((MAX_MINUTES,) * 3)
     for times in (widest, '-,-,-', '0,0,0'):
         cases += [('north_times', times), ('south_times', times)]
-    for label in sorted({v[1] for v in CONDITION_MAP.values()} | {DEFAULT_CONDITION[1], '--'}):
+    for label in sorted({c[3] for c in CONDITIONS} | {DEFAULT_CONDITION[1], '--'}):
         cases.append(('condition', label))
     for temp in (-40, -9, 0, 9, 99, 100, 120):
         cases.append(('temp', format_temperature(temp)))
+    for hi, lo in ((104, 88), (-10, -15), (99, -9), (61, 45)):
+        cases.append(('hi_lo', format_hi_lo(hi, lo)))
     return cases
 
 
@@ -90,7 +92,7 @@ def test_text_color_visible_on_leds(role):
 
 # (bitmap, where its screen's text starts, minimum black columns between art and text)
 CLEARANCE = [(s['bitmap'], layout.TEXT_X, 2) for s in layout.STATIONS.values()] + \
-    [(icon, layout.TEXT_X, 2) for icon in sorted({v[0] for v in CONDITION_MAP.values()})]
+    [(icon, layout.WEATHER_TEXT_X, 5) for icon in sorted({c[2] for c in CONDITIONS})]
 
 
 @pytest.mark.parametrize('bitmap', [c[0] for c in CLEARANCE] + [layout.TRAIN_ART])

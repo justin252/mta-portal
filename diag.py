@@ -5,6 +5,7 @@ runs them between main-loop passes:
     s  screen dump    [FB] BEGIN {state} / [FB] <y> <hex RGB565 LE row> / [FB] END
     i  status         [STATUS] {json}
     n  next screen    a  toggle train art
+    c  hold the weather screen on the next fake reading (weather.DEMO)    r  back to live
     w  drop WiFi      x  crash the main loop    h  hang (stop feeding the watchdog)
 The last three are fault injection: each must end in recovery, never a halted board.
 

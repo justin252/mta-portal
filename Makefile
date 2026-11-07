@@ -4,7 +4,7 @@ PY ?= .venv/bin/python
 PORTAL = $(PY) tools/portal.py
 LED_FLAG = $(if $(LED),--led)
 
-.PHONY: help setup test test-live sim deploy verify status logs inject soak
+.PHONY: help setup test test-live sim deploy verify status logs demo live inject soak
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -37,6 +37,12 @@ status: ## Board status JSON
 
 logs: ## Stream the board's serial log
 	$(PORTAL) logs
+
+demo: ## Show every weather scenario on the sign (HOLD=seconds each, default 5), then hold the last
+	$(PORTAL) demo tour --seconds $(or $(HOLD),5)
+
+live: ## End the weather demo: back to live data
+	$(PORTAL) demo live
 
 inject: ## Drop WiFi, crash, hang: each must recover on its own
 	$(PORTAL) inject wifi
