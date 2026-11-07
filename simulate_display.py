@@ -11,7 +11,7 @@ import sys
 from PIL import Image
 
 import layout
-from weather import format_temperature
+from weather import format_hi_lo, format_temperature, map_condition
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DISPLAY_W, DISPLAY_H = layout.WIDTH, layout.HEIGHT
@@ -104,7 +104,7 @@ def render_text(canvas, font, text, x, y, color):
 
 
 def render_screen(state):
-    """Render a screen state as the board reports it: {'screen', 'texts', 'bitmap'}."""
+    """Render a screen state as app.py reports it: {'screen', 'texts', 'bitmap'}."""
     screen, texts = state['screen'], dict(state.get('texts', {}))
     if screen == 'train_art':
         return Image.open(os.path.join(SCRIPT_DIR, layout.TRAIN_ART)).convert('RGB')
@@ -129,14 +129,11 @@ def render_display(line='L', north='3,8,14', south='1,5,12'):
     return render_screen({'screen': line, 'texts': {'north_times': north, 'south_times': south}})
 
 
-WEATHER_LABELS = {'sun': 'Clear', 'cloud': 'Cloudy', 'rain': 'Rain', 'snow': 'Snow', 'storm': 'Storm', 'fog': 'Fog'}
-
-
-def render_weather_display(condition='cloud', temp='42°F', label='Cloudy'):
+def render_weather_display(condition='cloud', temp='42°F', label='Cloudy', hi_lo='H:48 L:37'):
     """Render the weather screen; condition is an icon name ('cloud') or bitmap filename."""
     bitmap = condition if condition.endswith('.bmp') else 'weather-%s.bmp' % condition
     return render_screen({'screen': 'weather', 'bitmap': bitmap,
-                          'texts': {'condition': label, 'temp': temp}})
+                          'texts': {'condition': label, 'temp': temp, 'hi_lo': hi_lo}})
 
 
 def led_view(img):
@@ -156,8 +153,10 @@ def main():
     parser.add_argument('--south', default='1,5,12', help='Southbound arrival times')
     parser.add_argument('--train', action='store_true', help='Show full-screen train bitmap')
     parser.add_argument('--weather', action='store_true', help='Show weather screen')
-    parser.add_argument('--condition', default='cloud', choices=sorted(WEATHER_LABELS))
+    parser.add_argument('--code', type=int, default=3, help='WMO weather code (default 3, overcast)')
     parser.add_argument('--temp', type=float, default=42, help='Temperature in F')
+    parser.add_argument('--hi', type=float, default=48, help="Today's high in F")
+    parser.add_argument('--lo', type=float, default=37, help="Today's low in F")
     parser.add_argument('--led', action='store_true', help='Quantize colors to what the LEDs show')
     parser.add_argument('-o', '--output', default='simulated_display.png')
     args = parser.parse_args()
@@ -165,8 +164,9 @@ def main():
     if args.train:
         canvas = render_screen({'screen': 'train_art'})
     elif args.weather:
-        canvas = render_weather_display(args.condition, format_temperature(args.temp),
-                                        WEATHER_LABELS[args.condition])
+        bitmap, label = map_condition(args.code)
+        canvas = render_weather_display(bitmap, format_temperature(args.temp), label,
+                                        format_hi_lo(args.hi, args.lo))
     else:
         canvas = render_display(args.line, args.north, args.south)
     if args.led:

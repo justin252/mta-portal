@@ -1,70 +1,81 @@
-"""Tests for weather.py — pure weather logic."""
+"""Tests for weather.py: Open-Meteo current conditions."""
 import json
 import os
+
 import pytest
-from weather import parse_nws_forecast, map_condition, format_temperature
 
-FIXTURES = os.path.join(os.path.dirname(__file__), 'test_fixtures')
+from weather import (CONDITIONS, DEFAULT_CONDITION, DEMO, format_hi_lo, format_temperature,
+                     map_condition, parse_weather)
+
+ROOT = os.path.dirname(__file__)
+FIXTURES = os.path.join(ROOT, 'test_fixtures')
 
 
-class TestParseNwsForecast:
-    def test_basic(self):
-        data = {'properties': {'periods': [
-            {'temperature': 42, 'shortForecast': 'Partly Cloudy', 'icon': 'https://api.weather.gov/icons/land/day/sct,20'}
-        ]}}
-        result = parse_nws_forecast(data)
-        assert result == {'temp_f': 42, 'short_forecast': 'Partly Cloudy', 'icon_url': 'https://api.weather.gov/icons/land/day/sct,20'}
+class TestParseWeather:
+    def test_real_payload(self):
+        with open(os.path.join(FIXTURES, 'openmeteo_current.json')) as f:
+            assert parse_weather(json.load(f)) == {'temp_f': 48.6, 'code': 0, 'hi_f': 61.0, 'lo_f': 45.4}
 
-    def test_missing_icon(self):
-        data = {'properties': {'periods': [
-            {'temperature': 30, 'shortForecast': 'Snow'}
-        ]}}
-        result = parse_nws_forecast(data)
-        assert result['icon_url'] == ''
-
-    def test_negative_temp(self):
-        data = {'properties': {'periods': [
-            {'temperature': -5, 'shortForecast': 'Cold', 'icon': ''}
-        ]}}
-        assert parse_nws_forecast(data)['temp_f'] == -5
+    @pytest.mark.parametrize('payload', [
+        {},
+        {'current': {'temperature_2m': 50, 'weather_code': 0}},  # no daily hi/lo
+        {'current': {'temperature_2m': 50, 'weather_code': 0},
+         'daily': {'temperature_2m_max': [], 'temperature_2m_min': []}},
+        {'error': True, 'reason': 'Parameter latitude must be in range'},
+    ])
+    def test_malformed_payload_raises(self, payload):
+        with pytest.raises(Exception):
+            parse_weather(payload)
 
 
 class TestMapCondition:
-    @pytest.mark.parametrize("url,expected_bmp,expected_label", [
-        ('https://api.weather.gov/icons/land/day/skc', 'weather-sun.bmp', 'Clear'),
-        ('https://api.weather.gov/icons/land/day/few', 'weather-sun.bmp', 'Clear'),
-        ('https://api.weather.gov/icons/land/day/sct,20', 'weather-cloud.bmp', 'Cloudy'),
-        ('https://api.weather.gov/icons/land/day/bkn', 'weather-cloud.bmp', 'Cloudy'),
-        ('https://api.weather.gov/icons/land/day/ovc', 'weather-cloud.bmp', 'Overcast'),
-        ('https://api.weather.gov/icons/land/day/rain', 'weather-rain.bmp', 'Rain'),
-        ('https://api.weather.gov/icons/land/day/rain_showers,50', 'weather-rain.bmp', 'Rain'),
-        ('https://api.weather.gov/icons/land/day/snow', 'weather-snow.bmp', 'Snow'),
-        ('https://api.weather.gov/icons/land/day/sleet', 'weather-snow.bmp', 'Sleet'),
-        ('https://api.weather.gov/icons/land/day/tsra', 'weather-storm.bmp', 'Storm'),
-        ('https://api.weather.gov/icons/land/day/fog', 'weather-fog.bmp', 'Fog'),
-        ('https://api.weather.gov/icons/land/day/haze', 'weather-fog.bmp', 'Haze'),
-        ('https://api.weather.gov/icons/land/night/skc', 'weather-sun.bmp', 'Clear'),
+    # WMO weather codes as documented at open-meteo.com/en/docs
+    @pytest.mark.parametrize('code,bitmap,label', [
+        (0, 'weather-sun.bmp', 'Clear'),
+        (1, 'weather-sun.bmp', 'Clear'),
+        (2, 'weather-cloud.bmp', 'Cloudy'),
+        (3, 'weather-cloud.bmp', 'Overcast'),
+        (45, 'weather-fog.bmp', 'Fog'),
+        (48, 'weather-fog.bmp', 'Fog'),
+        (51, 'weather-rain.bmp', 'Drizzle'),
+        (55, 'weather-rain.bmp', 'Drizzle'),
+        (56, 'weather-snow.bmp', 'Sleet'),
+        (61, 'weather-rain.bmp', 'Rain'),
+        (65, 'weather-rain.bmp', 'Rain'),
+        (67, 'weather-snow.bmp', 'Sleet'),
+        (71, 'weather-snow.bmp', 'Snow'),
+        (77, 'weather-snow.bmp', 'Snow'),
+        (80, 'weather-rain.bmp', 'Showers'),
+        (82, 'weather-rain.bmp', 'Showers'),
+        (86, 'weather-snow.bmp', 'Snow'),
+        (95, 'weather-storm.bmp', 'Storm'),
+        (99, 'weather-storm.bmp', 'Storm'),
     ])
-    def test_conditions(self, url, expected_bmp, expected_label):
-        bmp, label = map_condition(url)
-        assert bmp == expected_bmp
-        assert label == expected_label
+    def test_codes(self, code, bitmap, label):
+        assert map_condition(code) == (bitmap, label)
 
-    def test_empty_url(self):
-        assert map_condition('') == ('weather-cloud.bmp', 'Cloudy')
+    @pytest.mark.parametrize('code', [-1, 4, 50, 100])
+    def test_unknown_code_falls_back(self, code):
+        assert map_condition(code) == DEFAULT_CONDITION
 
-    def test_unknown_condition(self):
-        assert map_condition('https://api.weather.gov/icons/land/day/xyz') == ('weather-cloud.bmp', 'Cloudy')
+    def test_every_icon_exists(self):
+        for icon in {c[2] for c in CONDITIONS} | {DEFAULT_CONDITION[0]}:
+            assert os.path.exists(os.path.join(ROOT, icon)), icon
 
-    def test_dual_condition_picks_impactful(self):
-        """NWS URLs can have two conditions (transition). We pick the last (most impactful)."""
-        bmp, label = map_condition('https://api.weather.gov/icons/land/night/sct/snow,80?size=medium')
-        assert bmp == 'weather-snow.bmp'
-        assert label == 'Snow'
 
-    def test_size_param_stripped(self):
-        bmp, _ = map_condition('https://api.weather.gov/icons/land/day/rain,40?size=medium')
-        assert bmp == 'weather-rain.bmp'
+class TestFormatHiLo:
+    @pytest.mark.parametrize('hi,lo,expected', [
+        (61.0, 45.4, 'H:61 L:45'),
+        (-2, -15.4, 'H:-2 L:-15'),
+        (104.4, 88, 'H:104 L:88'),
+    ])
+    def test_formatting(self, hi, lo, expected):
+        assert format_hi_lo(hi, lo) == expected
+
+
+def test_demo_covers_every_scenario():
+    # demo mode and `tools/portal.py verify --all` walk DEMO: every (icon, label) must appear
+    assert {map_condition(d['code']) for d in DEMO} == {(c[2], c[3]) for c in CONDITIONS}
 
 
 class TestFormatTemperature:
@@ -74,44 +85,7 @@ class TestFormatTemperature:
         (-5, '-5°F'),
         (100, '100°F'),
         (72.6, '73°F'),
+        (51.1, '51°F'),
     ])
     def test_formatting(self, temp, expected):
         assert format_temperature(temp) == expected
-
-
-class TestNwsIntegration:
-    """End-to-end test using a saved real NWS API response."""
-
-    @pytest.fixture
-    def nws_data(self):
-        with open(os.path.join(FIXTURES, 'nws_sample.json')) as f:
-            return json.load(f)
-
-    def test_parse_returns_valid_types(self, nws_data):
-        weather = parse_nws_forecast(nws_data)
-        assert isinstance(weather['temp_f'], (int, float))
-        assert isinstance(weather['short_forecast'], str)
-        assert isinstance(weather['icon_url'], str)
-
-    def test_icon_url_maps_to_known_bitmap(self, nws_data):
-        weather = parse_nws_forecast(nws_data)
-        bmp, label = map_condition(weather['icon_url'])
-        assert bmp.startswith('weather-') and bmp.endswith('.bmp')
-        assert len(label) <= 10
-
-    def test_temp_formats_cleanly(self, nws_data):
-        weather = parse_nws_forecast(nws_data)
-        temp_str = format_temperature(weather['temp_f'])
-        assert temp_str.endswith('°F')
-        # Strip suffix and verify it's a number
-        num_part = temp_str.replace('°F', '')
-        int(num_part)  # raises if not a valid int string
-
-    def test_full_pipeline(self, nws_data):
-        """Entire flow: parse → map → format. No step crashes, output is display-ready."""
-        weather = parse_nws_forecast(nws_data)
-        bmp, label = map_condition(weather['icon_url'])
-        temp = format_temperature(weather['temp_f'])
-        # All outputs are short enough for the 46px display area
-        assert len(label) <= 10
-        assert len(temp) <= 6
