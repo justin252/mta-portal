@@ -72,6 +72,18 @@ def font(role):
     return _fonts[role]
 
 
+def ink_right(fnt, text, x):
+    """One past the last lit column of text drawn at x (trailing glyph spacing draws nothing)."""
+    right, cursor = x, x
+    for ch in text:
+        glyph = fnt['glyphs'][ord(ch)]
+        w, _, xoff, _ = glyph['bbx']
+        if any(glyph['bitmap']):
+            right = max(right, cursor + xoff + w)
+        cursor += glyph['dwidth']
+    return right
+
+
 def text_width(fnt, text):
     """Pixel advance of text; missing glyphs draw nothing on the board either."""
     return sum(fnt['glyphs'][ord(ch)]['dwidth'] for ch in text if ord(ch) in fnt['glyphs'])
@@ -104,10 +116,10 @@ def render_text(canvas, font, text, x, y, color):
 
 
 def render_screen(state):
-    """Render a screen state as app.py reports it: {'screen', 'texts', 'bitmap'}."""
+    """Render a screen state (screens.py; also what the board reports in a dump)."""
     screen, texts = state['screen'], dict(state.get('texts', {}))
-    if screen == 'train_art':
-        return Image.open(os.path.join(SCRIPT_DIR, layout.TRAIN_ART)).convert('RGB')
+    if screen in ('art', 'train_art'):
+        return Image.open(os.path.join(SCRIPT_DIR, state.get('bitmap', layout.TRAIN_ART))).convert('RGB')
     if screen in STATIONS:
         station = STATIONS[screen]
         fields, bitmap = layout.TRAIN_FIELDS, state.get('bitmap', station['bitmap'])
@@ -119,8 +131,11 @@ def render_screen(state):
         raise ValueError('unknown screen %r' % screen)
     canvas = Image.new('RGB', (DISPLAY_W, DISPLAY_H), (0, 0, 0))
     canvas.paste(Image.open(os.path.join(SCRIPT_DIR, bitmap)).convert('RGB'), (0, 0))
+    colors = state.get('colors', {})
     for field, role, x, y in fields:
-        render_text(canvas, font(role), texts.get(field, ''), x, y, COLORS[role])
+        c = colors.get(field)
+        color = ((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF) if c is not None else COLORS[role]
+        render_text(canvas, font(role), texts.get(field, ''), x, y, color)
     return canvas
 
 
@@ -146,6 +161,26 @@ def led_view(img):
     return img.point(lambda c: (c >> shift) * 255 // top)
 
 
+def render_all(out_dir, led=False):
+    """Every scenario as a 10x PNG, plus sheet.png with all of them, for design review."""
+    import scenarios
+    os.makedirs(out_dir, exist_ok=True)
+    tiles = []
+    for sc in scenarios.SCENARIOS:
+        img = render_screen(scenarios.state(sc))
+        img = (led_view(img) if led else img).resize((DISPLAY_W * SCALE, DISPLAY_H * SCALE), Image.NEAREST)
+        img.save(os.path.join(out_dir, sc['name'] + '.png'))
+        tiles.append(img)
+    cols = 2
+    rows = (len(tiles) + cols - 1) // cols
+    w, h = tiles[0].size
+    sheet = Image.new('RGB', (cols * (w + 10) - 10, rows * (h + 10) - 10), (60, 60, 60))
+    for i, img in enumerate(tiles):
+        sheet.paste(img, ((i % cols) * (w + 10), (i // cols) * (h + 10)))
+    sheet.save(os.path.join(out_dir, 'sheet.png'))
+    print(os.path.join(out_dir, 'sheet.png'), file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Simulate MTA Portal LED matrix display')
     parser.add_argument('--line', choices=sorted(STATIONS), default='L')
@@ -157,12 +192,20 @@ def main():
     parser.add_argument('--temp', type=float, default=42, help='Temperature in F')
     parser.add_argument('--hi', type=float, default=48, help="Today's high in F")
     parser.add_argument('--lo', type=float, default=37, help="Today's low in F")
+    parser.add_argument('--scenario', help='Render one scenario from scenarios.py')
+    parser.add_argument('--all', metavar='DIR', help='Render every scenario into DIR, plus sheet.png')
     parser.add_argument('--led', action='store_true', help='Quantize colors to what the LEDs show')
     parser.add_argument('-o', '--output', default='simulated_display.png')
     args = parser.parse_args()
 
-    if args.train:
-        canvas = render_screen({'screen': 'train_art'})
+    if args.all:
+        render_all(args.all, args.led)
+        return
+    if args.scenario:
+        import scenarios
+        canvas = render_screen(scenarios.state(scenarios.BY_NAME[args.scenario]))
+    elif args.train:
+        canvas = render_screen({'screen': 'art', 'bitmap': layout.TRAIN_ART})
     elif args.weather:
         bitmap, label = map_condition(args.code)
         canvas = render_weather_display(bitmap, format_temperature(args.temp), label,

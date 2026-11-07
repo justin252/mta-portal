@@ -1,3 +1,4 @@
+import glob
 import os
 import sys
 import pytest
@@ -66,23 +67,29 @@ class TestPixelSpotChecks:
         assert self.img.getpixel((30, 0)) == (0, 0, 0)
 
 
-DEVICE_CAPTURES = os.path.join(FIXTURES, 'device')
+GOLDENS = sorted(glob.glob(os.path.join(FIXTURES, 'device', '*.png')))
 
 
-@pytest.mark.parametrize('capture', sorted(os.listdir(DEVICE_CAPTURES)))
-def test_matches_board_capture(capture):
-    """Board framebuffer dumps are ground truth: the simulator must reproduce them pixel-exact.
+@pytest.mark.parametrize('golden', GOLDENS, ids=os.path.basename)
+def test_matches_board_capture(golden):
+    """Board framebuffer captures are ground truth: the simulator must reproduce them pixel-exact.
 
-    Captured with `tools/portal.py shot` (raw [FB] lines from diag.py). Re-capture after any
-    layout change; a failure here means the simulator no longer predicts the LEDs.
+    One per scenario, captured with `tools/portal.py goldens` (state embedded in the PNG).
+    Re-capture after a layout change; a failure means the simulator no longer predicts the LEDs.
     """
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tools'))
     import portal
-    with open(os.path.join(DEVICE_CAPTURES, capture)) as f:
-        state, rows = portal.parse_dump(f.read().splitlines())
-    mismatches = portal.compare(portal.decode_rgb565(rows), portal.render_expected(state))
+    state, device_px = portal.load_golden(golden)
+    mismatches = portal.compare(device_px, portal.render_expected(state))
     assert not mismatches, '%d pixels differ from the board, first (x, y, board, sim): %s' % (
         len(mismatches), mismatches[0])
+
+
+def test_every_scenario_has_a_board_capture():
+    import scenarios
+    missing = [s['name'] for s in scenarios.SCENARIOS
+               if os.path.join(FIXTURES, 'device', s['name'] + '.png') not in GOLDENS]
+    assert not missing, 'capture with the board attached: make deploy goldens (%s)' % ', '.join(missing)
 
 
 class TestWeatherPixelSpotChecks:

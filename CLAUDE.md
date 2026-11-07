@@ -12,18 +12,27 @@ Every change is checked against what the board actually renders, not just agains
 
 | When | Run | Proves |
 |---|---|---|
-| Any change | `make test` | logic, recovery policy, layout rules, simulator == board captures, deploy list complete |
+| Any change | `make test` | logic, recovery policy, layout rules, scenarios, simulator == board captures, deploy list complete |
 | API or URL change | `make test-live` | endpoints answer 200 with the expected shape |
 | Anything that runs on the board | `make deploy` | copies changed files, waits for the first `[OK]` |
-| Display change | `make verify` | each screen, plus every weather icon via fake readings (`weather.DEMO`), captured from the board matches the simulator pixel for pixel |
+| Design change | `make sim`, then review with the user on the sign (below) | the user approves every affected design on the real LEDs |
+| Display change | `make verify` | every scenario in `scenarios.py`, shown on the board, matches the simulator pixel for pixel |
 | Network or error-handling change | `make inject` | WiFi drop, crash and hang each recover on their own |
 | Optional, after network changes | `make soak MINUTES=480` | hours without halts, data gaps, crashes or unexplained resets |
 
-To look at weather scenarios on the sign: `make demo` (fake readings, one per icon/label), then `make live`. Demo mode also ends on any button press or after 10 min.
-
 First time: `make setup`. Outputs go to `out/` (gitignored). Read the PNGs in `out/<screen>/` (`device_x10.png`, `sim_x10.png`, `diff.png`) when `verify` fails.
 
-**Updating board captures**: after an intentional layout change, `make deploy`, then `tools/portal.py verify --all` and copy each `out/<screen>/capture.txt` to `test_fixtures/device/<screen>.txt`. Captures contain only `[FB]` lines; never commit raw serial logs (they can contain the WiFi SSID).
+## Design review on the real sign
+
+Every design state is a scenario in `scenarios.py` with fixed data (`make scenarios` lists them). For any change to how the sign looks:
+
+1. Add or update a scenario for each state the change affects (`test_scenarios.py` fails if a weather condition or screen kind has none).
+2. `make sim`: renders every scenario to `out/sim/` plus `sheet.png`, no board needed.
+3. `make deploy`, then walk the user through the affected scenarios on the sign one at a time: `tools/portal.py show NAME`, share `out/scenes/NAME/device_x10.png`, wait for the user to say next. (In a terminal: `make review`, Enter for next.)
+4. Apply feedback and repeat. Then `make verify` and `make goldens`: reference images in `test_fixtures/device/` are board captures, one PNG per scenario with its state embedded. Commit them with the change.
+5. `make live` puts the sign back on live data (any button press, or 10 min, does too).
+
+Never commit raw serial logs (they can contain the WiFi SSID).
 
 ## The formulas (each pinned by a test)
 
@@ -42,11 +51,13 @@ Failure modes and the guard/test for each: `docs/failure-modes.md`.
 - `layout.py`: screen layout shared by `app.py` and the simulator (positions, fonts, colors, stations).
 - `logic.py`: pure: date math, arrival parsing/formatting.
 - `recovery.py`: pure: retry/reboot policy and `attempt()`, the catch-all fetch boundary.
-- `weather.py`: pure: Open-Meteo parsing (current + today's high/low), WMO code → icon/label, `DEMO` readings covering every icon.
-- `diag.py`: board-side serial commands (`s` dump, `i` status, `n` next screen, `a` art, `c` next fake weather reading, `w`/`x`/`h` fault injection) and the NVM event record.
+- `weather.py`: pure: Open-Meteo parsing (current + today's high/low), WMO code → icon/label.
+- `screens.py`: pure: data → screen state (bitmap, texts, colors). `app.py` applies states; the simulator renders the same ones.
+- `scenarios.py`: every design the sign can show, with fixed data, for review and verification.
+- `diag.py`: board-side serial commands, one per line (`s` dump, `i` status, `n` next screen, `a` art, `v NAME` hold a scenario, `r` back to live, `w`/`x`/`h` fault injection) and the NVM event record.
 - `safemode.py`: runs if CircuitPython enters safe mode (brownout, core fault); resets automatically after a 20s pause, every time.
 - `simulate_display.py`: desktop renderer from `layout.py` + the same fonts/bitmaps. `--led` quantizes to LED colors.
-- `tools/portal.py`: host CLI behind the make targets (deploy, verify, status, logs, demo, inject, soak).
+- `tools/portal.py`: host CLI behind the make targets (deploy, verify, show, review, live, goldens, status, logs, inject, soak).
 - Serial log prefixes: `[BOOT]`, `[OK]`, `[ERR]`, `[RECONNECT]`, `[RESET]`, `[CRASH]`, `[WEATHER]`, `[BTN]`, `[INJECT]`.
 
 ## Board

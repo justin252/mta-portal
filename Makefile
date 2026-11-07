@@ -4,7 +4,7 @@ PY ?= .venv/bin/python
 PORTAL = $(PY) tools/portal.py
 LED_FLAG = $(if $(LED),--led)
 
-.PHONY: help setup test test-live sim deploy verify status logs demo live inject soak
+.PHONY: help setup test test-live sim deploy verify review show live scenarios goldens status logs inject soak
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -19,30 +19,35 @@ test: ## Desktop checks: logic, recovery policy, layout rules, simulator vs boar
 test-live: ## Contract checks against the real train and weather APIs
 	$(PY) -m pytest -m live
 
-sim: ## Render every screen to out/sim/ (LED=1: only the colors the LEDs can show)
-	@mkdir -p out/sim
-	$(PY) simulate_display.py --line L $(LED_FLAG) -o out/sim/L.png
-	$(PY) simulate_display.py --line G $(LED_FLAG) -o out/sim/G.png
-	$(PY) simulate_display.py --weather $(LED_FLAG) -o out/sim/weather.png
-	$(PY) simulate_display.py --train $(LED_FLAG) -o out/sim/train_art.png
+sim: ## Render every scenario to out/sim/ plus sheet.png, no board needed (LED=1: LED colors)
+	$(PY) simulate_display.py --all out/sim $(LED_FLAG)
 
 deploy: ## Copy changed files to the board, watch it boot to its first good fetch
 	$(PORTAL) deploy
 
-verify: ## Capture every screen from the board and diff against the simulator
+verify: ## Show every scenario on the board, diff each against the simulator
 	$(PORTAL) verify --all
+
+review: ## Design review on the real sign: one scenario at a time, Enter for the next
+	$(PORTAL) review
+
+show: ## Hold one scenario on the sign: make show NAME=weather-rain
+	$(PORTAL) show $(NAME)
+
+live: ## End a held scenario: back to live data
+	$(PORTAL) live
+
+scenarios: ## List the scenarios
+	$(PORTAL) scenarios
+
+goldens: ## Capture every scenario from the board as a reference image (after a design change)
+	$(PORTAL) goldens
 
 status: ## Board status JSON
 	$(PORTAL) status
 
 logs: ## Stream the board's serial log
 	$(PORTAL) logs
-
-demo: ## Show every weather scenario on the sign (HOLD=seconds each, default 5), then hold the last
-	$(PORTAL) demo tour --seconds $(or $(HOLD),5)
-
-live: ## End the weather demo: back to live data
-	$(PORTAL) demo live
 
 inject: ## Drop WiFi, crash, hang: each must recover on its own
 	$(PORTAL) inject wifi

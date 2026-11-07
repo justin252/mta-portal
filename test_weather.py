@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from weather import (CONDITIONS, DEFAULT_CONDITION, DEMO, format_hi_lo, format_temperature,
+from weather import (CONDITIONS, DEFAULT_CONDITION, format_hi_lo, format_temperature,
                      map_condition, parse_weather)
 
 ROOT = os.path.dirname(__file__)
@@ -71,11 +71,6 @@ class TestFormatHiLo:
     ])
     def test_formatting(self, hi, lo, expected):
         assert format_hi_lo(hi, lo) == expected
-
-
-def test_demo_covers_every_scenario():
-    # demo mode and `tools/portal.py verify --all` walk DEMO: every (icon, label) must appear
-    assert {map_condition(d['code']) for d in DEMO} == {(c[2], c[3]) for c in CONDITIONS}
 
 
 class TestFormatTemperature:

@@ -47,8 +47,9 @@ Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/
 make test        # desktop: logic, recovery policy, layout rules, simulator vs board captures
 make test-live   # real train and weather APIs
 make deploy      # copy changed files to the board, wait for the first good fetch
-make verify      # capture every screen (and every weather icon) from the board, diff against the simulator
-make demo        # show every weather scenario on the sign with fake readings; `make live` to go back
+make verify      # show every design on the board, diff each against the simulator
+make sim         # render every design (scenarios.py) to out/sim/, no board needed
+make review      # walk every design on the real sign, Enter for the next; `make live` to go back
 make inject      # drop WiFi, crash, hang: each must recover on its own
 make soak        # optional: watch the board for hours (halts, data gaps, crashes, unexplained resets)
 make sim LED=1   # render screens as the LEDs show them (2 bits per color channel)
