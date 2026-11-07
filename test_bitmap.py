@@ -112,3 +112,23 @@ def test_letter_centered(train):
         f"{letter} x center={mid_x}, expected ~{CIRCLE_X}\n{viz}"
     assert abs(mid_y - CIRCLE_Y) <= 0.5, \
         f"{letter} y center={mid_y}, expected ~{CIRCLE_Y}\n{viz}"
+
+
+# Committed bitmaps must be what their generator scripts produce: editing one without
+# regenerating the other ships art nobody reviewed. (The L/G dashboards need macOS Helvetica.)
+@pytest.mark.parametrize('name', ['sun', 'cloud', 'rain', 'snow', 'storm', 'fog'])
+def test_weather_icon_matches_generator(name, tmp_path, monkeypatch):
+    import generate_weather_bitmaps
+    monkeypatch.chdir(tmp_path)  # the generator writes into the current directory
+    getattr(generate_weather_bitmaps, 'generate_' + name)()
+    filename = 'weather-%s.bmp' % name
+    generated = Image.open(tmp_path / filename).convert('RGB')
+    assert generated.tobytes() == Image.open(os.path.join(BMP_DIR, filename)).convert('RGB').tobytes()
+
+
+def test_train_art_matches_generator(tmp_path):
+    import generate_train_bitmap
+    out = tmp_path / 'train.bmp'
+    generate_train_bitmap.create_train_art(str(out))
+    committed = Image.open(os.path.join(BMP_DIR, 'train.bmp')).convert('RGB')
+    assert Image.open(out).convert('RGB').tobytes() == committed.tobytes()

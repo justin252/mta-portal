@@ -50,53 +50,39 @@ class TestPixelSpotChecks:
         self.img = render_display('L', '3,8,14', '1,5,12')
 
     def test_label_m_top_left(self):
-        # 'M' in 'Manhattan', tom-thumb at x=18 y=4: first lit pixel at (18, 2)
-        assert self.img.getpixel((18, 2)) == (0x44, 0x44, 0x44)
+        # 'M' in 'Manhattan', tom-thumb at x=18 y=4: top = 4 - 5 - 0 + 5//2 = 1 (board-verified)
+        assert self.img.getpixel((18, 1)) == (0x44, 0x44, 0x44)
 
     def test_label_m_gap(self):
-        # 'M' bitmap row 0 is 0xA0 (10100000) — middle pixel (19,2) is black
-        assert self.img.getpixel((19, 2)) == (0, 0, 0)
+        # 'M' bitmap row 0 is 0xA0 (10100000) — middle pixel (19,1) is black
+        assert self.img.getpixel((19, 1)) == (0, 0, 0)
 
     def test_time_3_top(self):
-        # '3' in north times, spleen at x=18 y=11: row 1 (0x60) lights (19, 9)
-        assert self.img.getpixel((19, 9)) == (0xDD, 0x80, 0x00)
+        # '3' in north times, spleen at x=18 y=11: top = 11 - 8 + 1 + 7//2 = 7, row 1 (0x60) lights (19, 8)
+        assert self.img.getpixel((19, 8)) == (0xDD, 0x80, 0x00)
 
     def test_black_background(self):
         # Right side of display, no text rendered here
         assert self.img.getpixel((30, 0)) == (0, 0, 0)
 
 
-class TestReferenceImages:
-    """Compare full renders against stored reference images."""
+DEVICE_CAPTURES = os.path.join(FIXTURES, 'device')
 
-    def _compare(self, actual, ref_path, tmp_path):
-        ref = Image.open(ref_path).convert('RGB')
-        assert actual.size == ref.size, f"Size mismatch: {actual.size} vs {ref.size}"
-        mismatches = []
-        for y in range(actual.size[1]):
-            for x in range(actual.size[0]):
-                if actual.getpixel((x, y)) != ref.getpixel((x, y)):
-                    mismatches.append((x, y, actual.getpixel((x, y)), ref.getpixel((x, y))))
-        if mismatches:
-            actual_path = tmp_path / os.path.basename(ref_path).replace('.png', '_actual.png')
-            actual.save(actual_path)
-            pytest.fail(
-                f"{len(mismatches)} pixel mismatches (saved actual to {actual_path}). "
-                f"First: ({mismatches[0][0]},{mismatches[0][1]}) "
-                f"got {mismatches[0][2]} expected {mismatches[0][3]}"
-            )
 
-    def test_l_train(self, tmp_path):
-        actual = render_display('L', '3,8,14', '1,5,12')
-        self._compare(actual, os.path.join(FIXTURES, 'ref_L.png'), tmp_path)
+@pytest.mark.parametrize('capture', sorted(os.listdir(DEVICE_CAPTURES)))
+def test_matches_board_capture(capture):
+    """Board framebuffer dumps are ground truth: the simulator must reproduce them pixel-exact.
 
-    def test_g_train(self, tmp_path):
-        actual = render_display('G', '2,7,15', '4,9,20')
-        self._compare(actual, os.path.join(FIXTURES, 'ref_G.png'), tmp_path)
-
-    def test_weather(self, tmp_path):
-        actual = render_weather_display('cloud', format_temperature(42), 'Cloudy')
-        self._compare(actual, os.path.join(FIXTURES, 'ref_weather.png'), tmp_path)
+    Captured with `tools/portal.py shot` (raw [FB] lines from diag.py). Re-capture after any
+    layout change; a failure here means the simulator no longer predicts the LEDs.
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tools'))
+    import portal
+    with open(os.path.join(DEVICE_CAPTURES, capture)) as f:
+        state, rows = portal.parse_dump(f.read().splitlines())
+    mismatches = portal.compare(portal.decode_rgb565(rows), portal.render_expected(state))
+    assert not mismatches, '%d pixels differ from the board, first (x, y, board, sim): %s' % (
+        len(mismatches), mismatches[0])
 
 
 class TestWeatherPixelSpotChecks:
@@ -107,12 +93,12 @@ class TestWeatherPixelSpotChecks:
         self.img = render_weather_display('cloud', format_temperature(42), 'Cloudy')
 
     def test_condition_label_pixel(self):
-        # 'C' in 'Cloudy', tom-thumb at x=18 y=10: first lit pixel at (19, 8)
-        assert self.img.getpixel((19, 8)) == (0x44, 0x44, 0x44)
+        # 'C' in 'Cloudy', tom-thumb at x=18 y=10: top = 10 - 5 - 0 + 5//2 = 7, C starts 1px in
+        assert self.img.getpixel((19, 7)) == (0x44, 0x44, 0x44)
 
     def test_temp_pixel(self):
-        # '4' in '42°F', spleen at x=18 y=22: first lit pixel at (18, 20)
-        assert self.img.getpixel((18, 20)) == (0xDD, 0x80, 0x00)
+        # '4' in '42°F', spleen at x=18 y=22: top = 22 - 8 + 1 + 7//2 = 18, row 1 is lit
+        assert self.img.getpixel((18, 19)) == (0xDD, 0x80, 0x00)
 
     def test_weather_bitmap_present(self):
         # Cloud bitmap should have non-black pixels in left 18px
