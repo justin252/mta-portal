@@ -38,7 +38,7 @@ WEATHER_URL = 'https://api.weather.gov/gridpoints/OKX/35,35/forecast'
 
 UPDATE_DELAY = 30           # train fetch interval (seconds)
 WEATHER_UPDATE_DELAY = 300  # weather fetch interval (5 min)
-SCREEN_CYCLE_DELAY = 10    # seconds between screen switches
+SCREEN_CYCLE_DELAYS = {'L': 5, 'G': 2, 'weather': 10}  # per-screen display time
 SYNC_TIME_DELAY = 30
 ERROR_RESET_THRESHOLD = 3
 LONG_PRESS_THRESHOLD = 1.0  # seconds
@@ -248,7 +248,8 @@ while True:
     now_mono = time.monotonic()
 
     # Screen cycling — only when in cycle mode
-    if current_view == 'cycle' and now_mono > last_cycle_switch + SCREEN_CYCLE_DELAY:
+    current_screen_delay = SCREEN_CYCLE_DELAYS.get(screens[screen_idx][0], 10)
+    if current_view == 'cycle' and now_mono > last_cycle_switch + current_screen_delay:
         next_idx = (screen_idx + 1) % len(screens)
         # Skip weather screen if no data yet
         if next_idx == 2 and cached_weather is None:
