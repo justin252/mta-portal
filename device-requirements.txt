@@ -1,0 +1,10 @@
+# Libraries the board needs in /lib: circup install -r device-requirements.txt
+# Verified on CircuitPython 10.0.3 with: adafruit_matrixportal 3.2.9, adafruit_display_text 3.3.4,
+# adafruit_bitmap_font 2.3.2, adafruit_debouncer 2.0.13, adafruit_ticks 1.1.5.
+# adafruit_portalbase, adafruit_requests, adafruit_esp32spi, adafruit_connection_manager and
+# neopixel are frozen into the MatrixPortal M4 firmware.
+adafruit_matrixportal
+adafruit_display_text
+adafruit_bitmap_font
+adafruit_debouncer
+adafruit_ticks

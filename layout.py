@@ -1,8 +1,9 @@
-"""Screen layout for simulate_display.py, mirroring the positions code.py builds on the board.
+"""Screen layout shared by app.py (board) and simulate_display.py (desktop).
 
-Text uses adafruit_display_text Label semantics: x is the left edge, and each glyph's top
-lands at y - glyph_height - glyph_yoffset + font_ascent // 2. Board framebuffer captures in
-test_fixtures/device/ prove the simulator and the board agree (test_simulate_display.py).
+One source of truth so the simulator can't drift from the board. Text uses
+adafruit_display_text Label semantics: x is the left edge, and each glyph's top lands
+at y - glyph_height - glyph_yoffset + font_ascent // 2. Board framebuffer captures in
+test_fixtures/device/ pin this down (test_simulate_display.py).
 """
 
 WIDTH, HEIGHT = 64, 32
@@ -24,6 +25,7 @@ WEATHER_FIELDS = (
     ('temp', 'time', TEXT_X, 22),
 )
 
+LINES = ('L', 'G')  # screen order: UP jumps to LINES[0], DOWN to LINES[1]
 STATIONS = {
     'L': {'stop_id': 'L11', 'north': 'Manhattan', 'south': 'Canarsie', 'bitmap': 'l-dashboard.bmp'},
     'G': {'stop_id': 'G29', 'north': 'Queens', 'south': 'Church Av', 'bitmap': 'g-dashboard.bmp'},
