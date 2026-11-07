@@ -23,13 +23,14 @@ import diag
 import layout
 from logic import TRAIN_URL, format_arrival_triple, parse_station, server_time
 from recovery import Recovery, attempt
-from weather import DEFAULT_CONDITION, format_temperature, map_condition, parse_nws_forecast
+from weather import (DEFAULT_CONDITION, DEMO, WEATHER_URL, format_hi_lo, format_temperature,
+                     map_condition, parse_weather)
 
 UPDATE_DELAY = 30           # train fetch interval (s); MTA feeds refresh about every 30s
-WEATHER_URL = 'https://api.weather.gov/gridpoints/OKX/35,35/forecast'
-WEATHER_UPDATE_DELAY = 300  # weather fetch interval (5 min)
+WEATHER_UPDATE_DELAY = 900  # Open-Meteo current conditions change every 15 min
 WEATHER_RETRY_DELAY = 120   # after a failed weather fetch
-SCREEN_CYCLE_DELAYS = {'L': 5, 'G': 2, 'weather': 10}  # per-screen display time (s)
+DEMO_TIMEOUT = 600          # demo mode ends on its own if nobody ends it
+CYCLE_SECONDS = 2           # every screen gets the same time
 LONG_PRESS_MS = 1000
 HTTP_TIMEOUT = 5            # per socket operation (s); keeps one request inside the watchdog window
 WATCHDOG_TIMEOUT = 16       # SAMD51 maximum; if the loop stops feeding it, the board resets
@@ -79,7 +80,7 @@ for line in layout.LINES:
         'north': station['north'], 'north_times': '-,-,-',
         'south': station['south'], 'south_times': '-,-,-'}))
 screens.append(build_screen('weather', DEFAULT_CONDITION[0], layout.WEATHER_FIELDS,
-                            {'condition': '--', 'temp': '--'}))
+                            {'condition': '--', 'temp': '--', 'hi_lo': ''}))
 by_name = {s['name']: s for s in screens}
 
 screen_idx = 0
@@ -182,13 +183,21 @@ def show_arrivals(arrivals):
 
 def show_weather(weather):
     global weather_ok
-    bitmap, condition = map_condition(weather['icon_url'])
+    if weather is None:  # no real reading yet: placeholders, and keep the screen out of the cycle
+        s = by_name['weather']
+        set_text(s['labels']['condition'], '--')
+        set_text(s['labels']['temp'], '--')
+        set_text(s['labels']['hi_lo'], '')
+        weather_ok = False
+        return
+    bitmap, condition = map_condition(weather['code'])
     s = by_name['weather']
     if s['bitmap'] != bitmap:
         s['group'][0] = tile(bitmap)  # swap in place; the old bitmap's file closes when collected
         s['bitmap'] = bitmap
     set_text(s['labels']['condition'], condition)
     set_text(s['labels']['temp'], format_temperature(weather['temp_f']))
+    set_text(s['labels']['hi_lo'], format_hi_lo(weather['hi_f'], weather['lo_f']))
     weather_ok = True
 
 
@@ -199,6 +208,33 @@ def status():
                  'failures': trains.failures, 'age': trains.age(s), 'mem': gc.mem_free(),
                  'up': (now_ms() - boot_ms) // 1000, 'wifi': wifi.is_connected,
                  'run': diag.run_reason(), 'last_event': diag.recall()})
+
+
+def demo_weather():
+    """Hold the weather screen on the next fake reading from weather.DEMO (diag 'c')."""
+    global demo_idx, demo_until
+    demo_idx = (demo_idx + 1) % len(DEMO)
+    reading = DEMO[demo_idx]
+    show_weather(reading)
+    if current_view == 'train_art':
+        toggle_art()
+    show(len(screens) - 1)
+    demo_until = now_s() + DEMO_TIMEOUT
+    print('[DEMO] %d/%d %s %s %s' % (demo_idx + 1, len(DEMO), map_condition(reading['code'])[1],
+                                     format_temperature(reading['temp_f']),
+                                     format_hi_lo(reading['hi_f'], reading['lo_f'])))
+
+
+def live_weather():
+    """Leave demo mode: real reading back, cycling resumes, fresh fetch now (diag 'r')."""
+    global demo_until, next_weather_s, last_cycle_switch
+    if demo_until is None:
+        return
+    demo_until = None
+    show_weather(live_reading)
+    next_weather_s = now_s()
+    last_cycle_switch = now_ms()  # the current screen gets its full turn before cycling on
+    print('[DEMO] back to live data')
 
 
 def drop_wifi():
@@ -224,6 +260,8 @@ commands = {
     'i': status,
     'n': lambda: toggle_art() if current_view == 'train_art' else next_screen(),
     'a': toggle_art,
+    'c': demo_weather,
+    'r': live_weather,
     'w': drop_wifi,
     'x': crash,
     'h': hang,
@@ -245,6 +283,9 @@ wdt.mode = WatchDogMode.RESET
 
 trains = Recovery(UPDATE_DELAY, now=now_s())
 next_weather_s = now_s() + 15  # trains first
+demo_idx = -1
+demo_until = None   # set while demo mode holds the weather screen on a fake reading
+live_reading = None
 
 while True:
     wdt.feed()
@@ -257,6 +298,7 @@ while True:
     if (button_up.rose or button_down.rose) and button_press_ms is not None:
         held = now_ms() - button_press_ms
         button_press_ms = None
+        live_weather()  # any press ends demo mode
         if held >= LONG_PRESS_MS or current_view == 'train_art':
             toggle_art()  # long press toggles; any press leaves the art view
         else:
@@ -265,8 +307,10 @@ while True:
                 print('[BTN] %s -> %s' % ('UP' if button_up.rose else 'DOWN', screens[target]['name']))
                 show(target)
 
-    if (current_view == 'cycle' and now_ms() - last_cycle_switch
-            > SCREEN_CYCLE_DELAYS.get(screens[screen_idx]['name'], 10) * 1000):
+    if demo_until is not None and now_s() >= demo_until:
+        live_weather()
+    if (current_view == 'cycle' and demo_until is None
+            and now_ms() - last_cycle_switch > CYCLE_SECONDS * 1000):
         next_screen()
 
     if trains.due(now_s()):
@@ -289,16 +333,18 @@ while True:
                 diag.remember('reset: ' + reason)
                 microcontroller.reset()
 
-    if now_s() >= next_weather_s:
+    if demo_until is None and now_s() >= next_weather_s:
         try:
-            weather = parse_nws_forecast(get_json(WEATHER_URL)[0])
+            weather = parse_weather(get_json(WEATHER_URL)[0])
         except Exception as e:  # weather is optional: log, retry later, never escalate
             next_weather_s = now_s() + WEATHER_RETRY_DELAY
             print('[WEATHER] failed %s: %s' % (type(e).__name__, e))
             gc.collect()
         else:
+            live_reading = weather
             show_weather(weather)
             next_weather_s = now_s() + WEATHER_UPDATE_DELAY
-            print('[WEATHER] %s %s' % (weather['short_forecast'], format_temperature(weather['temp_f'])))
+            print('[WEATHER] %s %s code=%d' % (format_temperature(weather['temp_f']),
+                                            format_hi_lo(weather['hi_f'], weather['lo_f']), weather['code']))
 
     time.sleep(0.1)

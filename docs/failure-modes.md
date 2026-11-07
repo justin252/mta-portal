@@ -14,9 +14,10 @@ What can go wrong with the sign, what guards against it, and the check that prov
 | Hang (a call that never returns) | Frozen display forever | Hardware watchdog, 16s (SAMD51 max), fed every loop pass and before each request | `make inject` (hang): loop stops feeding → hard reset → `[BOOT] run=STARTUP` → `[OK]` |
 | Brownout or core fault | Safe mode, waits for the reset button | `safemode.py` resets automatically every time, after a 20s pause that keeps the USB drive usable for fixes | Logic only; a real brownout can't be injected |
 | Time sync | Adafruit IO time request every 30s, inside the same `try` as trains: an AIO outage blocked arrivals and caused reboots. Timezone guessed from IP | Minutes computed against the train API's own `Date` header: no clock sync, no timezone, one less request per cycle | `test_logic.py` checks the date math against CPython `datetime`; `make test-live` checks the server clock is within 5 min |
+| Weather: 404 + 13 KB JSON | NWS grid `OKX/35,35` is a marine zone (404), so the weather screen never showed; the 13 KB response was too big for a heap where a 4 KB allocation failed | Open-Meteo current conditions + today's high/low (~560 bytes); weather failures retry in 2 min and never count toward a reboot | `make test-live`; `make verify` captures the weather screen |
 | Unexplained hard resets | Invisible | `[BOOT]` prints the run reason and the last event saved in NVM. A hard reset with no `[RESET]` before it is the watchdog, a power drop, or the button | `make soak` fails on any unexplained reset |
 | Long uptime | `time.monotonic()` is a float that loses precision after days; long-press and the 2s G screen drift after ~2 weeks | Integer milliseconds from `time.monotonic_ns()` | Not automated |
-| Memory pressure | A 4 KB contiguous allocation failed on this heap | `gc.collect()` after each fetch, free memory logged on every `[OK]`, no large copies | `make soak` reports the min/max free memory |
+| Memory pressure | 13 KB weather JSON; 4 KB copies failed | Small payloads, `gc.collect()` after each fetch, free memory logged on every `[OK]` | `make soak` reports the min/max free memory |
 
 ## Display
 
@@ -25,9 +26,10 @@ What can go wrong with the sign, what guards against it, and the check that prov
 | Simulator drifts from the board (it drew all text 1px low and its own reference images agreed with it) | Board framebuffer captures are the reference images (`test_fixtures/device/`) | `test_simulate_display.py::test_matches_board_capture`; `make verify` |
 | Text clipped at the right edge (3-digit minutes) | Arrivals over 99 min are dropped | `test_layout.py` renders the widest strings with the real BDF metrics |
 | Character drawn as a gap (the degree sign in `spleen-5x8.bdf` was blank: "49 F") | Glyph drawn; tests require ink, not just a glyph entry | `test_layout.py` |
+| A weather icon that never appears in testing (it's only shown when it rains) | `weather.DEMO` has one fake reading per icon; diag command `c` shows them | `make verify` checks every icon on the board |
 | Color invisible on the LEDs (bit depth 2 keeps only the top 2 bits per channel) | Text colors checked | `test_layout.py`; `make sim LED=1` shows art details that go black (about a quarter of the train art's lit pixels) |
 | Rows overlapping or off-screen | Rows computed from the Label placement formula | `test_layout.py` |
-| Bitmap crowding the text | Logos and weather icons keep 2 clear columns before the text at x=18 | `test_layout.py` |
+| Bitmap crowding the text | Train logos keep 2 clear columns before the text at x=18; weather icons keep 5 before x=21 | `test_layout.py` |
 | Deploy missing a file (`weather.py` was missing on main) | `tools/portal.py deploy` copies the `DEPLOY` list; a boot crash reloads instead of halting | `test_manifest.py` checks every import and asset is deployed |
 
 ## Not covered
@@ -35,4 +37,3 @@ What can go wrong with the sign, what guards against it, and the check that prov
 - `microcontroller.cpu.reset_reason` is always `UNKNOWN` on SAMD51, so watchdog, power and button resets look the same.
 - Physical buttons, LED brightness and color accuracy: check by eye.
 - Real brownouts: `safemode.py` can only be exercised by forcing safe mode from the REPL.
-- Weather: the NWS grid point `OKX/35,35` is a marine zone and returns 404, so the weather screen never shows. Unchanged here; replaced in the next PR.
