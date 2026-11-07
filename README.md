@@ -11,13 +11,13 @@ Real-time NYC subway arrivals + weather on a 64x32 RGB LED matrix ([Adafruit Mat
 
 ## Usage
 
-Display auto-cycles **L train → G train → weather**, 2 seconds each. The weather screen joins once the first weather fetch succeeds.
+Display auto-cycles **L train (4s) → G train (4s) → weather (3s)**. The weather screen joins once the first weather fetch succeeds.
 
-The weather screen shows an icon for the current condition (sun, cloud, fog, rain, snow, storm), the condition name, the current temperature, and today's high and low (`H:61 L:45`).
+- **Arrivals**: gold numbers are live. Dim numbers are over 90s old (network trouble). `Loading` and `Offline` mean no data yet; `No trains` means the API lists none.
+- **Weather**: an icon for the condition (sun or moon, partly cloudy day or night, cloud, fog, drizzle, rain, showers, sleet, snow, storm), the condition, the temperature, and today's high and low (`H:61 L:45`).
 
-- **Short press UP / DOWN**: jump to the L / G screen
-- **Long press (1s) either button**: toggle full-screen pixel art train view
-- **Any press in train view**: return to cycling
+- **UP**: art mode on/off (pixel art, a new piece every 10s: rooftop-disco train, Manhattan skyline, Williamsburg Bridge, pizza rat)
+- **DOWN**: back to the transit screens (sports mode will live here)
 
 ## Architecture
 
@@ -29,7 +29,7 @@ The weather screen shows an icon for the current condition (sun, cloud, fog, rai
 - `safemode.py`: automatic recovery from safe mode (brownouts)
 - `simulate_display.py`: desktop renderer, pixel-exact against the board
 - `tools/portal.py`: deploy and verify against the real board
-- `*-dashboard.bmp`, `weather-*.bmp`, `train.bmp`: bitmaps
+- `*-dashboard.bmp`, `weather-*.bmp`, `art-*.bmp`: bitmaps, made by `generate_train_bitmap.py`, `generate_weather_bitmaps.py`, `generate_art.py`
 
 Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/) API (wraps MTA GTFS-RT) and [Open-Meteo](https://open-meteo.com/) current conditions and today's high/low (no key required).
 

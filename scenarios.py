@@ -8,13 +8,25 @@ every new design state: tests fail if a weather condition or screen kind has non
 import screens
 
 SCENARIOS = (
+    # Train screens: live, then every empty state
     {'name': 'L', 'about': 'L train, typical arrivals', 'train': ('L', [2, 6, 11], [4, 9, 14])},
     {'name': 'G', 'about': 'G train, one train southbound', 'train': ('G', [5, 15, 24], [8])},
     {'name': 'L-widest', 'about': 'L train, widest times that fit', 'train': ('L', [97, 98, 99], [97, 98, 99])},
-    {'name': 'weather-clear', 'about': 'Clear, warm day',
+    {'name': 'G-no-trains', 'about': 'No G trains listed northbound (service change)',
+     'train': ('G', [], [3, 12, 21])},
+    {'name': 'L-stale', 'about': 'Data over 90s old: numbers dim until a fetch succeeds',
+     'train': ('L', [2, 6, 11], [4, 9, 14], 'stale')},
+    {'name': 'L-loading', 'about': 'Just booted, first fetch not back yet', 'train': ('L', [], [], 'loading')},
+    {'name': 'L-offline', 'about': 'No data and fetches failing (outage)', 'train': ('L', [], [], 'offline')},
+    # Weather: every icon and label, day and night
+    {'name': 'weather-clear', 'about': 'Clear day',
      'weather': {'code': 0, 'temp_f': 72.4, 'hi_f': 81, 'lo_f': 65}},
-    {'name': 'weather-cloudy', 'about': 'Partly cloudy',
+    {'name': 'weather-clear-night', 'about': 'Clear night',
+     'weather': {'code': 0, 'temp_f': 41, 'hi_f': 55, 'lo_f': 39, 'is_day': False}},
+    {'name': 'weather-cloudy', 'about': 'Partly cloudy day',
      'weather': {'code': 2, 'temp_f': 58, 'hi_f': 63, 'lo_f': 50}},
+    {'name': 'weather-cloudy-night', 'about': 'Partly cloudy night',
+     'weather': {'code': 2, 'temp_f': 47, 'hi_f': 58, 'lo_f': 44, 'is_day': False}},
     {'name': 'weather-overcast', 'about': 'Overcast, widest negative temperatures',
      'weather': {'code': 3, 'temp_f': -9.6, 'hi_f': -2, 'lo_f': -15}},
     {'name': 'weather-fog', 'about': 'Fog', 'weather': {'code': 45, 'temp_f': 51, 'hi_f': 55, 'lo_f': 48}},
@@ -27,7 +39,11 @@ SCENARIOS = (
     {'name': 'weather-snow', 'about': 'Snow', 'weather': {'code': 73, 'temp_f': 28, 'hi_f': 31, 'lo_f': 19}},
     {'name': 'weather-storm', 'about': 'Thunderstorm, widest 3-digit temperatures',
      'weather': {'code': 95, 'temp_f': 100.2, 'hi_f': 104, 'lo_f': 88}},
-    {'name': 'art-train', 'about': 'Train art (rooftop disco)', 'art': 'train.bmp'},
+    # Art mode (UP button)
+    {'name': 'art-train', 'about': 'Art: rooftop disco on the L', 'art': 'art-train.bmp'},
+    {'name': 'art-skyline', 'about': 'Art: Manhattan skyline at night', 'art': 'art-skyline.bmp'},
+    {'name': 'art-bridge', 'about': 'Art: Williamsburg Bridge at dusk', 'art': 'art-bridge.bmp'},
+    {'name': 'art-rat', 'about': 'Art: pizza rat', 'art': 'art-rat.bmp'},
 )
 BY_NAME = {s['name']: s for s in SCENARIOS}
 

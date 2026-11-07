@@ -8,7 +8,7 @@ from PIL import Image
 import layout
 from logic import MAX_MINUTES
 from simulate_display import font, ink_right
-from weather import CONDITIONS, DEFAULT_CONDITION, format_hi_lo, format_temperature
+from weather import CONDITIONS, DEFAULT_CONDITION, NIGHT, format_hi_lo, format_temperature
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FIELDS = {field: (role, x, y) for field, role, x, y in layout.TRAIN_FIELDS + layout.WEATHER_FIELDS}
@@ -80,12 +80,26 @@ def test_text_color_visible_on_leds(role):
 
 # (bitmap, where its screen's text starts, minimum black columns between art and text)
 CLEARANCE = [(s['bitmap'], layout.TEXT_X, 2) for s in layout.STATIONS.values()] + \
-    [(icon, layout.WEATHER_TEXT_X, 5) for icon in sorted({c[2] for c in CONDITIONS})]
+    [(icon, layout.WEATHER_TEXT_X, 5) for icon in sorted({c[2] for c in CONDITIONS} | set(NIGHT.values()))]
 
 
-@pytest.mark.parametrize('bitmap', [c[0] for c in CLEARANCE] + [layout.TRAIN_ART])
+ALL_BITMAPS = [c[0] for c in CLEARANCE] + list(layout.ART)
+
+
+@pytest.mark.parametrize('bitmap', ALL_BITMAPS)
 def test_bitmap_fills_screen(bitmap):
     assert Image.open(os.path.join(ROOT, bitmap)).size == (layout.WIDTH, layout.HEIGHT)
+
+
+@pytest.mark.parametrize('bitmap', ALL_BITMAPS)
+def test_bitmap_visible_on_leds(bitmap):
+    # A lit pixel with every channel below 64 is black on the matrix (bit depth 2): art drawn
+    # in those colors silently loses detail on the board (the old train's windows and door did)
+    img = Image.open(os.path.join(ROOT, bitmap)).convert('RGB')
+    shift = 8 - layout.BIT_DEPTH
+    colors = {c for _, c in img.getcolors(layout.WIDTH * layout.HEIGHT)}
+    dark = sorted(p for p in colors if p != (0, 0, 0) and max(c >> shift for c in p) == 0)
+    assert not dark, '%s has colors the LEDs show as black: %s' % (bitmap, dark[:5])
 
 
 @pytest.mark.parametrize('bitmap,text_x,gap', CLEARANCE)
