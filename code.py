@@ -17,6 +17,7 @@ from adafruit_matrixportal.matrix import Matrix
 from adafruit_matrixportal.network import Network
 from logic import filter_arrivals, format_arrival_triple
 from weather import parse_nws_forecast, map_condition, format_temperature
+import diag
 
 STATIONS = {
     'L': {
@@ -211,9 +212,26 @@ current_view = 'cycle'  # 'cycle' or 'train_art'
 _train_art_file = None
 button_press_time = None
 
+
+def current_state():
+    """What is on screen, read back from the live Labels, for diag.py's screen dumps."""
+    if current_view == 'train_art':
+        return {'screen': 'train_art', 'texts': {}, 'bitmap': 'train.bmp'}
+    name, grp = screens[screen_idx]
+    if name == 'weather':
+        fields = ('condition', 'temp')
+        bitmap = map_condition(cached_weather['icon_url'])[0] if cached_weather else 'weather-cloud.bmp'
+    else:
+        fields = ('north', 'north_times', 'south', 'south_times')
+        bitmap = STATIONS[name]['bitmap']
+    # grp[0] is the bitmap TileGrid; the labels follow in field order
+    return {'screen': name, 'texts': {f: grp[i + 1].text for i, f in enumerate(fields)}, 'bitmap': bitmap}
+
+
 # Main loop: poll buttons at 100ms, fetch trains every 30s, weather every 5min,
 # cycle display every 10s. Long press toggles train pixel art view.
 while True:
+    diag.poll(display, current_state)  # serial commands from tools/portal.py
     button_up.update()
     button_down.update()
 
