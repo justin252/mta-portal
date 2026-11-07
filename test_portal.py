@@ -112,3 +112,73 @@ def test_cli_verify_mismatch_exit_code(tmp_path, capsys):
     out = capsys.readouterr().out
     assert 'mismatches' in out and 'best label shift -1' in out
 
+
+def log(*lines, step=30):
+    return [(i * step, line) for i, line in enumerate(lines)]
+
+
+def test_soak_passes_healthy_log():
+    summary, failures = portal.summarize(log(
+        '[BOOT] run=SUPERVISOR_RELOAD last_event=None mem=90000',
+        '[OK] L N:1,2,3 S:4,5,6 G N:1,2,3 S:4,5,6 t=1.2s mem=81000',
+        '[ERR] OutOfRetries: Repeated socket failures fails=1 age=35s t=6.0s mem=80000',
+        '[OK] L N:1,2,3 S:4,5,6 G N:1,2,3 S:4,5,6 t=1.1s mem=80500',
+        '[WEATHER] 51°F code=0'))
+    assert failures == []
+    assert summary['ok'] == 2 and summary['errors'] == {'OutOfRetries': 1}
+    assert summary['mem'] == [81000, 80500] and summary['fetch_s'] == [1.2, 6.0, 1.1]
+    assert summary['max_gap_s'] == 60
+
+
+def test_soak_fails_on_halt_and_long_gap():
+    _, failures = portal.summarize([
+        (0, '[OK] L N:1,2,3 S:4,5,6 G N:1,2,3 S:4,5,6 t=1.2s mem=81000'),
+        (200, 'Traceback (most recent call last):'),
+        (201, 'Code done running.'),
+        (400, 'Press any key to enter the REPL. Use CTRL-D to reload.'),
+    ])
+    assert any('halted' in f for f in failures)
+    assert any('no fresh data' in f for f in failures)
+
+
+def test_soak_guarded_crash_is_not_a_halt():
+    # what the board printed during `inject crash`: logged, reloaded, back to fetching
+    summary, failures = portal.summarize([
+        (0, '[OK] L N:1,2,3 S:4,5,6 G N:1,2,3 S:4,5,6 t=1.2s mem=81000'),
+        (5, '[CRASH] RuntimeError: injected crash'),
+        (5, 'Traceback (most recent call last):'),
+        (15, 'Code done running.'),
+        (15, 'soft reboot'),
+        (16, "[BOOT] run=SUPERVISOR_RELOAD last_event='crash' mem=64064"),
+        (60, '[OK] L N:1,2,3 S:4,5,6 G N:1,2,3 S:4,5,6 t=4.0s mem=62432'),
+    ])
+    assert summary['halted'] == []
+    assert failures == ['1 crash(es), recovered but a bug: [CRASH] RuntimeError: injected crash']
+
+
+def test_clean_line_strips_circuitpython_escapes():
+    # exact bytes from the board after a reload: terminal-title OSC glued to the first line
+    raw = (b'\x1b]0;\xf0\x9f\x90\x8dcode.py | 10.0.3\x1b\\[BOOT] reset=UNKNOWN '
+           b'run=SUPERVISOR_RELOAD\r\n')
+    assert portal.clean_line(raw) == '[BOOT] reset=UNKNOWN run=SUPERVISOR_RELOAD'
+    assert portal.clean_line(b'\x1b[2K\x1b[0GAuto-reload is on.\r\n') == 'Auto-reload is on.'
+
+
+def test_soak_fails_without_any_fetch():
+    _, failures = portal.summarize(log('[BOOT] run=SUPERVISOR_RELOAD last_event=None mem=1'))
+    assert 'no successful fetch' in failures
+
+
+def test_soak_flags_unexplained_hard_reset_but_not_policy_reset():
+    ok = '[OK] L N:1,2,3 S:4,5,6 G N:1,2,3 S:4,5,6 t=1.2s mem=81000'
+    summary, failures = portal.summarize([
+        (0, ok),
+        (100, '[RESET] no data 185s, 9 fails, last OutOfRetries'),
+        (115, "[BOOT] run=STARTUP last_event='reset: no data 185s' mem=90000"),
+        (130, ok),
+        (500, "[BOOT] run=STARTUP last_event='reset: no data 185s' mem=90000"),
+        (520, ok),
+    ])
+    assert len(summary['boots']) == 2
+    assert summary['unexplained_resets'] == ["500s: [BOOT] run=STARTUP last_event='reset: no data 185s' mem=90000"]
+    assert any('no logged cause' in f for f in failures)

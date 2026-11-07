@@ -6,6 +6,7 @@ import pytest
 from PIL import Image
 
 import layout
+from logic import MAX_MINUTES
 from simulate_display import font
 from weather import CONDITION_MAP, DEFAULT_CONDITION, format_temperature
 
@@ -18,7 +19,7 @@ def worst_cases():
     cases = []
     for station in layout.STATIONS.values():
         cases += [('north', station['north']), ('south', station['south'])]
-    widest = '99,99,99'  # widest 2-digit arrivals
+    widest = '%d,%d,%d' % ((MAX_MINUTES,) * 3)
     for times in (widest, '-,-,-', '0,0,0'):
         cases += [('north_times', times), ('south_times', times)]
     for label in sorted({v[1] for v in CONDITION_MAP.values()} | {DEFAULT_CONDITION[1], '--'}):
