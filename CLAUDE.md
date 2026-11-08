@@ -39,7 +39,7 @@ Never commit raw serial logs (they can contain the WiFi SSID).
 - **Text placement** (`simulate_display.render_text`, matches `adafruit_display_text.Label`): glyph top = `y - bbx_h - bbx_yoff + font_ascent // 2`, x advances by DWIDTH. Fits iff `TEXT_X + sum(dwidth) <= 64`. Tested in `test_layout.py`, `test_simulate_display.py`.
 - **LED color**: displayio truncates RGB888 to RGB565, then the Protomatter driver keeps the top `BIT_DEPTH` (2) bits per channel: `level = c8 >> (8 - BIT_DEPTH)`. Channels below 64 are off. `make sim LED=1` shows the result.
 - **Minutes**: `round((t_train - t_server) / 60)` using the API's HTTP `Date` header as now; keep 0..99, soonest first, show 3. Epoch math stays in ints (CircuitPython floats have ~22 bits). Tested in `test_logic.py`.
-- **Recovery**: retry after 5/15/30s; reboot when ≥3 failures in a row and no data for 180s; watchdog 16s. Tested in `test_recovery.py`.
+- **Recovery**: retry after 5/10/15s (then every 15s); reboot when ≥3 failures in a row and no data for 180s; watchdog 16s. Tested in `test_recovery.py`.
 - **Framebuffer dump**: RGB565 little-endian, one hex row per `[FB]` line (`diag.py`, decoded by `tools/portal.py`).
 
 Failure modes and the guard/test for each: `docs/failure-modes.md`.

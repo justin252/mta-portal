@@ -39,7 +39,7 @@ Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/
 
 **Server time**: minutes are computed against the train API's own HTTP `Date` header, so the board needs no clock sync and no timezone setting.
 
-**Error recovery**: a failed fetch retries after 5, 15, then 30s, rejoining WiFi if the link is down. If nothing succeeds for 3 minutes, the board reboots, which is the one reset that reliably clears ESP32 and socket state. Nothing ever gives up: outages just mean another retry or reboot until the network is back. Any unexpected exception soft-reloads the board instead of halting it, a 16s hardware watchdog catches hangs, and `safemode.py` resets out of safe mode after a brownout. Details: [docs/failure-modes.md](docs/failure-modes.md).
+**Error recovery**: a failed fetch retries after 5, 10, then every 15s, rejoining WiFi if the link is down. If nothing succeeds for 3 minutes, the board reboots, which is the one reset that reliably clears ESP32 and socket state. Nothing ever gives up: outages just mean another retry or reboot until the network is back. Any unexpected exception soft-reloads the board instead of halting it, a 16s hardware watchdog catches hangs, and `safemode.py` resets out of safe mode after a brownout. Details: [docs/failure-modes.md](docs/failure-modes.md).
 
 ## Verification
 
