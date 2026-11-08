@@ -4,8 +4,9 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from logic import (MAX_MINUTES, STALE_AFTER, arrival_minutes, days_from_civil, freshness,
-                   http_date_to_epoch, iso_to_epoch, parse_station, server_time, times_text)
+from logic import (MAX_MINUTES, STALE_AFTER, arrival_minutes, clock_text, days_from_civil, freshness,
+                   http_date_to_epoch, iso_to_epoch, parse_station, server_clock, server_time,
+                   times_text, utc_offset)
 
 FIXTURES = os.path.join(os.path.dirname(__file__), 'test_fixtures')
 # Date header served with the saved train_*.json fixtures
@@ -148,16 +149,43 @@ class TestParseStation:
             parse_station(payload, 'L', self.NOW)
 
 
+class TestClock:
+    @pytest.mark.parametrize('iso,offset', [
+        ('2026-11-07T18:49:02-05:00', -5 * 3600),
+        ('2026-07-04T09:05:00-04:00', -4 * 3600),   # daylight saving: the API's offset changes with it
+        ('2026-11-07T21:31:56Z', 0),
+        ('2026-11-07T16:37:43.875+05:30', 5 * 3600 + 1800),
+    ])
+    def test_utc_offset(self, iso, offset):
+        assert utc_offset(iso) == offset
+
+    @pytest.mark.parametrize('local,text', [
+        ('2026-11-07T00:05:00', '12:05'),   # just after midnight
+        ('2026-11-07T06:05:59', '6:05'),
+        ('2026-11-07T12:52:00', '12:52'),   # noon hour
+        ('2026-11-07T13:00:00', '1:00'),
+        ('2026-11-07T23:59:00', '11:59'),
+    ])
+    def test_clock_text(self, local, text):
+        epoch = iso_to_epoch(local + '-05:00')
+        assert clock_text(epoch, -5 * 3600) == text
+
+    def test_server_clock_from_real_payload(self):
+        epoch, offset = server_clock({'date': FIXTURE_DATE}, load('train_L11.json'))
+        assert (offset, clock_text(epoch, offset)) == (-5 * 3600, '4:31')  # 21:31:56 GMT
+
+
 class TestTimesText:
     def test_three_soonest(self):
         assert times_text([2, 6, 11, 15]) == '2,6,11'
 
-    def test_fewer_than_three(self):
-        # no '-' padding: "4,12" reads better than "4,12,-"
-        assert times_text([4, 12]) == '4,12'
+    def test_fewer_than_three_padded(self):
+        # '-' fills the row out to three slots (design review: "8,-,-" over "8")
+        assert times_text([4, 12]) == '4,12,-'
+        assert times_text([8]) == '8,-,-'
 
     def test_none(self):
-        assert times_text([]) == 'No trains'
+        assert times_text([]) == '-,-,-'
 
 
 class TestFreshness:

@@ -5,8 +5,7 @@ import pytest
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
-from simulate_display import parse_bdf, render_display, render_weather_display, SCRIPT_DIR
-from weather import format_temperature
+from simulate_display import font, parse_bdf, render_text, SCRIPT_DIR
 
 FIXTURES = os.path.join(os.path.dirname(__file__), 'test_fixtures')
 
@@ -43,28 +42,30 @@ class TestParseBdf:
         assert len(spleen['glyphs']) > 90
 
 
-class TestPixelSpotChecks:
-    """Verify rendering math by checking specific pixel colors."""
+class TestTextPlacementFormula:
+    """render_text at fixed positions: glyph top = y - bbx_h - bbx_yoff + ascent // 2.
+    Expectations derived from board captures, independent of layout.py."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self):
-        self.img = render_display('L', '3,8,14', '1,5,12')
+    def canvas(self, role, text, x, y):
+        img = Image.new('RGB', (64, 32))
+        render_text(img, font(role), text, x, y, (255, 255, 255))
+        return img
 
-    def test_label_m_top_left(self):
-        # 'M' in 'Manhattan', tom-thumb at x=18 y=4: top = 4 - 5 - 0 + 5//2 = 1 (board-verified)
-        assert self.img.getpixel((18, 1)) == (0x44, 0x44, 0x44)
+    def test_label_font_cap_top(self):
+        # 'M' in tom-thumb (BBX 3 5 0 0, ascent 5): top = 4 - 5 - 0 + 2 = 1
+        img = self.canvas('label', 'M', 18, 4)
+        assert img.getpixel((18, 1)) == (255, 255, 255) and img.getpixel((18, 0)) == (0, 0, 0)
+        assert img.getpixel((19, 1)) == (0, 0, 0)  # 'M' row 0 is 0xA0: gap in the middle
 
-    def test_label_m_gap(self):
-        # 'M' bitmap row 0 is 0xA0 (10100000) — middle pixel (19,1) is black
-        assert self.img.getpixel((19, 1)) == (0, 0, 0)
+    def test_time_font_digit_row(self):
+        # '3' in spleen (BBX 5 8 0 -1, ascent 7): top = 11 - 8 + 1 + 3 = 7, row 1 (0x60) lights x+1
+        img = self.canvas('time', '3', 18, 11)
+        assert img.getpixel((19, 8)) == (255, 255, 255) and img.getpixel((19, 7)) == (0, 0, 0)
 
-    def test_time_3_top(self):
-        # '3' in north times, spleen at x=18 y=11: top = 11 - 8 + 1 + 7//2 = 7, row 1 (0x60) lights (19, 8)
-        assert self.img.getpixel((19, 8)) == (0xDD, 0x80, 0x00)
-
-    def test_black_background(self):
-        # Right side of display, no text rendered here
-        assert self.img.getpixel((30, 0)) == (0, 0, 0)
+    def test_clock_font_is_compact(self):
+        # 1px between glyphs: '1' (2 wide) then '2' starts at x+3
+        img = self.canvas('clock', '12', 0, 7)
+        assert img.getpixel((3, 4)) == (255, 255, 255) and img.getpixel((2, 4)) == (0, 0, 0)
 
 
 GOLDENS = sorted(glob.glob(os.path.join(FIXTURES, 'device', '*.png')))
@@ -85,32 +86,22 @@ def test_matches_board_capture(golden):
         len(mismatches), mismatches[0])
 
 
+@pytest.mark.parametrize('golden', GOLDENS, ids=os.path.basename)
+def test_board_capture_is_current(golden):
+    """A capture taken before a scenario changed would still pass the test above: catch it."""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tools'))
+    import portal
+    import scenarios
+    captured, _ = portal.load_golden(golden)
+    name = os.path.basename(golden)[:-len('.png')]
+    assert name in scenarios.BY_NAME, 'capture for unknown scenario %r: delete it' % name
+    want = scenarios.state(scenarios.BY_NAME[name])
+    got = {k: captured.get(k) for k in want}
+    assert got == want, 'capture for %s is out of date: make deploy, then make goldens' % name
+
+
 def test_every_scenario_has_a_board_capture():
     import scenarios
     missing = [s['name'] for s in scenarios.SCENARIOS
                if os.path.join(FIXTURES, 'device', s['name'] + '.png') not in GOLDENS]
     assert not missing, 'capture with the board attached: make deploy goldens (%s)' % ', '.join(missing)
-
-
-class TestWeatherPixelSpotChecks:
-    """Verify weather screen rendering."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self):
-        self.img = render_weather_display('cloud', format_temperature(42), 'Cloudy')
-
-    def test_condition_label_pixel(self):
-        # 'C' in 'Cloudy', tom-thumb at x=21 y=6: top = 6 - 5 - 0 + 5//2 = 3, C starts 1px in
-        assert self.img.getpixel((22, 3)) == (0x44, 0x44, 0x44)
-
-    def test_temp_pixel(self):
-        # '4' in '42°F', spleen at x=21 y=16: top = 16 - 8 + 1 + 7//2 = 12, row 1 is lit
-        assert self.img.getpixel((21, 13)) == (0xDD, 0x80, 0x00)
-
-    def test_weather_bitmap_present(self):
-        # Cloud bitmap should have non-black pixels in left 18px
-        has_content = any(
-            self.img.getpixel((x, y)) != (0, 0, 0)
-            for x in range(18) for y in range(32)
-        )
-        assert has_content

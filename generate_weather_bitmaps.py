@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Generate weather icon bitmaps for the LED matrix (64x32, icon in left 18px)."""
+"""Generate weather icon bitmaps for the LED matrix (64x32, icon in the left box of layout.py)."""
 from PIL import Image, ImageDraw
 
 WIDTH, HEIGHT = 64, 32
-CX, CY = 8, 16  # icon center, same as train circle
+CX, CY = 8, 16  # design center; save() moves every icon by SHIFT
+SHIFT = (1, 5)  # into layout.py's left box: centered on x=9, below the clock
 
 
 def save(img, filename):
-    img.save(filename, format='BMP')
+    placed = make_canvas()
+    placed.paste(img.crop((0, 0, WIDTH - SHIFT[0], HEIGHT - SHIFT[1])), SHIFT)
+    placed.save(filename, format='BMP')
     print("Generated %s" % filename)
 
 

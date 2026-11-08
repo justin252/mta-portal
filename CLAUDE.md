@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-CircuitPython app for an Adafruit MatrixPortal M4 + 64x32 RGB LED matrix. Auto-cycles L train arrivals (Graham Av, stop L11, 4s), G train arrivals (Metropolitan Av, stop G29, 4s) and weather (3s). Train data from `api.wheresthefuckingtrain.com`; weather (condition icon day/night + label, temperature, today's high/low) from Open-Meteo. UP toggles art mode (4 pieces, 10s each); DOWN returns to transit (sports mode will live there). Arrival rows show `Loading`/`Offline`/`No trains`, and dim when data is over 90s old: gold always means live.
+CircuitPython app for an Adafruit MatrixPortal M4 + 64x32 RGB LED matrix. Auto-cycles L train arrivals (Graham Av, stop L11, 4s), G train arrivals (Metropolitan Av, stop G29, 4s) and weather (3s). Train data from `api.wheresthefuckingtrain.com`; weather (condition icon day/night + label, temperature, today's high/low) from Open-Meteo. UP toggles art mode (4 pieces, 10s each); DOWN returns to transit (sports mode will live there). Transit screens are two boxes: a clock over the line logo or weather icon on the left, the text centered on the right. Arrival rows show three dim dots (`•••`) before the first fetch, `offline` when fetches fail with no data, dim `-,-,-` when no trains are listed, and dim numbers when data is over 90s old: gold always means live.
 
 ## Verification loop (required)
 
@@ -36,7 +36,8 @@ Never commit raw serial logs (they can contain the WiFi SSID).
 
 ## The formulas (each pinned by a test)
 
-- **Text placement** (`simulate_display.render_text`, matches `adafruit_display_text.Label`): glyph top = `y - bbx_h - bbx_yoff + font_ascent // 2`, x advances by DWIDTH. Fits iff `TEXT_X + sum(dwidth) <= 64`. Tested in `test_layout.py`, `test_simulate_display.py`.
+- **Text placement** (`simulate_display.render_text`, matches `adafruit_display_text.Label`): glyph top = `y - bbx_h - bbx_yoff + font_ascent // 2`, x advances by DWIDTH. Every field is centered in its box by `layout.centered_x` (ink width from the first glyph's x offset to the last glyph's right edge); the board and the simulator both call it. Tested in `test_layout.py`, `test_simulate_display.py`.
+- **Clock**: server time (train API `Date` header) plus the UTC offset in the feed's own timestamps (daylight saving included), ticking on the board's timer between fetches; 12-hour without am/pm; blank until the first good fetch. `fonts/clock.bdf` is tom-thumb's digits with 1px spacing (`generate_clock_font.py`). Tested in `test_logic.py`.
 - **LED color**: displayio truncates RGB888 to RGB565, then the Protomatter driver keeps the top `BIT_DEPTH` (2) bits per channel: `level = c8 >> (8 - BIT_DEPTH)`. Channels below 64 are off. `make sim LED=1` shows the result.
 - **Minutes**: `round((t_train - t_server) / 60)` using the API's HTTP `Date` header as now; keep 0..99, soonest first, show 3. Epoch math stays in ints (CircuitPython floats have ~22 bits). Tested in `test_logic.py`.
 - **Recovery**: retry after 5/10/15s (then every 15s); reboot when ≥3 failures in a row and no data for 180s; watchdog 16s. Tested in `test_recovery.py`.
@@ -48,7 +49,7 @@ Failure modes and the guard/test for each: `docs/failure-modes.md`.
 
 - `code.py`: bootstrap. Imports `app`; any exception that escapes is logged (`[CRASH]`), saved to NVM, and the board soft-reloads. Never halts at "Code done running".
 - `app.py`: hardware main loop: buttons, screen cycle, fetch, display, watchdog, diag commands.
-- `layout.py`: screen layout shared by `app.py` and the simulator (positions, fonts, colors, stations).
+- `layout.py`: screen layout shared by `app.py` and the simulator: the left box (clock, logo or icon) and right box (text), fonts, colors, stations, `centered_x`.
 - `logic.py`: pure: date math, arrival parsing/formatting.
 - `recovery.py`: pure: retry/reboot policy and `attempt()`, the catch-all fetch boundary.
 - `weather.py`: pure: Open-Meteo parsing (current + today's high/low), WMO code → icon/label.

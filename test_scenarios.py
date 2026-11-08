@@ -6,7 +6,7 @@ import pytest
 
 import layout
 import scenarios
-from simulate_display import font, ink_right, render_screen
+from simulate_display import font, glyph_metrics, ink_right, render_screen
 from weather import CONDITIONS, map_condition
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +47,7 @@ def test_scenario_renders_and_fits(scenario):
     st = scenarios.state(scenario)
     assert os.path.exists(os.path.join(ROOT, st['bitmap']))
     for field, text in st['texts'].items():
-        _, role, x, _ = FIELDS[field]
-        assert ink_right(font(role), text, x) <= layout.WIDTH, '%s: %r is clipped' % (field, text)
+        _, role, box, _ = FIELDS[field]
+        x = layout.centered_x(text, glyph_metrics(role), box)
+        assert ink_right(font(role), text, x) <= box[0] + box[1], '%s: %r leaves its box' % (field, text)
     assert render_screen(st).size == (layout.WIDTH, layout.HEIGHT)

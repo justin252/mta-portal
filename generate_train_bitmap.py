@@ -2,7 +2,7 @@
 from PIL import Image, ImageDraw, ImageFont
 
 WIDTH, HEIGHT = 64, 32
-CIRCLE_X, CIRCLE_Y = 8, 16
+CIRCLE_X, CIRCLE_Y = 9, 20  # layout.py's left box: centered on x=9, below the clock
 CIRCLE_RADIUS = 7
 FONT_SIZE = 10
 FONT_PATH = "/System/Library/Fonts/Helvetica.ttc"

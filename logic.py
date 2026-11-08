@@ -23,21 +23,26 @@ def days_from_civil(y, m, d):
     return era * 146097 + doe - 719468
 
 
+def utc_offset(s):
+    """'2026-11-07T18:49:02-05:00' -> -18000: seconds east of UTC. Requires an offset or Z."""
+    tz = s.split('T')[1][8:]
+    if tz.startswith('.'):  # fractional seconds
+        tz = tz.lstrip('.0123456789')
+    if tz == 'Z':
+        return 0
+    if len(tz) != 6 or tz[0] not in '+-':
+        raise ValueError('no UTC offset in %r' % s)
+    offset = int(tz[1:3]) * 3600 + int(tz[4:6]) * 60
+    return offset if tz[0] == '+' else -offset
+
+
 def iso_to_epoch(s):
     """'2026-11-07T16:37:43-05:00' -> Unix seconds. Requires an offset or Z."""
     day, clock = s.split('T')
     y, mo, d = day.split('-')
-    secs = (days_from_civil(int(y), int(mo), int(d)) * 86400
-            + int(clock[0:2]) * 3600 + int(clock[3:5]) * 60 + int(clock[6:8]))
-    tz = clock[8:]
-    if tz.startswith('.'):  # fractional seconds: whole minutes are all the sign shows
-        tz = tz.lstrip('.0123456789')
-    if tz == 'Z':
-        return secs
-    if len(tz) != 6 or tz[0] not in '+-':
-        raise ValueError('no UTC offset in %r' % s)
-    offset = int(tz[1:3]) * 3600 + int(tz[4:6]) * 60
-    return secs - offset if tz[0] == '+' else secs + offset
+    local = (days_from_civil(int(y), int(mo), int(d)) * 86400
+             + int(clock[0:2]) * 3600 + int(clock[3:5]) * 60 + int(clock[6:8]))
+    return local - utc_offset(s)
 
 
 def http_date_to_epoch(s):
@@ -52,6 +57,19 @@ def server_time(headers, payload):
     """Current time per the train API: its Date header, else the feed's 'updated' stamp."""
     date = headers.get('date')
     return http_date_to_epoch(date) if date else iso_to_epoch(payload['updated'])
+
+
+def server_clock(headers, payload):
+    """(Unix seconds, New York's UTC offset) per the train API: the clock needs no time sync,
+    and the offset in the feed's own timestamps follows daylight saving."""
+    return server_time(headers, payload), utc_offset(payload['updated'])
+
+
+def clock_text(epoch, offset):
+    """Local 12-hour time without am/pm: '6:05', '12:52'."""
+    minutes = (epoch + offset) // 60
+    hour = minutes // 60 % 24
+    return '%d:%02d' % ((hour - 1) % 12 + 1, minutes % 60)
 
 
 def arrival_minutes(entries, route, now):
@@ -74,8 +92,9 @@ def parse_station(payload, route, now):
 
 
 def times_text(minutes):
-    """Arrival row: up to three soonest, or 'No trains' when the API lists none."""
-    return ','.join(str(m) for m in minutes[:3]) if minutes else 'No trains'
+    """Arrival row: the three soonest, '-' filling empty slots ("8,-,-", "-,-,-")."""
+    slots = [str(m) for m in minutes[:3]]
+    return ','.join(slots + ['-'] * (3 - len(slots)))
 
 
 def freshness(has_data, age, failures):

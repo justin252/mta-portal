@@ -23,7 +23,7 @@ What can go wrong with the sign, what guards against it, and the check that prov
 
 | Failure | Guard | Verified by |
 |---|---|---|
-| Stale numbers look live during an outage | Arrival rows dim after 90s without a good fetch; `Loading` / `Offline` when there is no data; `No trains` when the API lists none | `test_screens.py`; scenarios `L-stale`, `L-loading`, `L-offline`, `G-no-trains` verified on the board |
+| Stale numbers look live during an outage | Arrival rows dim after 90s without a good fetch; `Loading` / `Offline` when there is no data; dim `-,-,-` when the API lists no trains | `test_screens.py`; scenarios `L-stale`, `L-loading`, `L-offline`, `G-no-trains` verified on the board |
 | Simulator drifts from the board (it drew all text 1px low and its own reference images agreed with it) | Board framebuffer captures are the reference images (`test_fixtures/device/`) | `test_simulate_display.py::test_matches_board_capture`; `make verify` |
 | Text clipped at the right edge (3-digit minutes) | Arrivals over 99 min are dropped | `test_layout.py` renders the widest strings with the real BDF metrics |
 | Character drawn as a gap (the degree sign in `spleen-5x8.bdf` was blank: "49 F") | Glyph drawn; tests require ink, not just a glyph entry | `test_layout.py` |

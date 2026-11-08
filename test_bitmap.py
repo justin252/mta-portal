@@ -5,8 +5,8 @@ import pytest
 BMP_DIR = os.path.dirname(__file__)
 LETTER_COLOR = (0, 0, 0)
 BLACK = (0, 0, 0)
-CIRCLE_X = 8
-CIRCLE_Y = 16
+CIRCLE_X = 9
+CIRCLE_Y = 20
 CIRCLE_RADIUS = 7
 
 TRAINS = {
@@ -137,3 +137,10 @@ def test_art_matches_generator(name, tmp_path):
     getattr(generate_art, 'create_' + name)(str(out))
     committed = Image.open(os.path.join(BMP_DIR, 'art-%s.bmp' % name)).convert('RGB')
     assert Image.open(out).convert('RGB').tobytes() == committed.tobytes()
+
+
+def test_clock_font_matches_generator(tmp_path):
+    import generate_clock_font
+    generate_clock_font.main(str(tmp_path / 'clock.bdf'))
+    with open(os.path.join(BMP_DIR, 'fonts', 'clock.bdf')) as f:
+        assert (tmp_path / 'clock.bdf').read_text() == f.read()

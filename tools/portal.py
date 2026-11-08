@@ -44,7 +44,7 @@ DRIVES = ('/Volumes/CIRCUITPY', '/media/%s/CIRCUITPY' % os.getenv('USER', ''),
 # Everything the board runs, in copy order: code.py last, so the auto-reload its write
 # triggers starts the new code with every dependency already in place
 DEPLOY = (
-    'fonts/tom-thumb.bdf', 'fonts/spleen-5x8.bdf',
+    'fonts/tom-thumb.bdf', 'fonts/spleen-5x8.bdf', 'fonts/clock.bdf',
     'l-dashboard.bmp', 'g-dashboard.bmp',
     'art-train.bmp', 'art-skyline.bmp', 'art-bridge.bmp', 'art-rat.bmp',
     'weather-sun.bmp', 'weather-moon.bmp', 'weather-partly.bmp', 'weather-partly-night.bmp',
