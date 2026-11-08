@@ -6,6 +6,7 @@ runs them between main-loop passes:
     i         status         [STATUS] {json}
     n         next screen    a  toggle train art
     v NAME    hold a scenario from scenarios.py on the sign    r  back to live data
+    b FILE    hold any 64x32 BMP on the sign (design mockups: tools/portal.py preview)
     w         drop WiFi      x  crash the main loop    h  hang (stop feeding the watchdog)
 The last three are fault injection: each must end in recovery, never a halted board.
 
