@@ -192,6 +192,21 @@ def hold(name):
     print('[SCENE] %s' % name)
 
 
+def hold_image(path):
+    """Show any full-screen 64x32 BMP on the sign, held like a scenario (diag 'b FILE'):
+    design mockups get judged on the real LEDs before they're built."""
+    global held, held_until, mode
+    try:
+        apply(screens.art_state(path))
+    except OSError as e:
+        print('[SCENE] cannot show %r: %r' % (path, e))
+        return
+    mode = 'art'
+    display.root_group = art['group']
+    held, held_until = path, now_s() + HOLD_TIMEOUT
+    print('[SCENE] %s' % path)
+
+
 def release():
     global held, mode
     if held is None:
@@ -278,6 +293,7 @@ commands = {
     'n': lambda arg: next_art() if mode == 'art' else next_screen(),
     'a': lambda arg: set_mode('transit' if mode == 'art' else 'art'),
     'v': hold,
+    'b': hold_image,
     'r': lambda arg: release(),
     'w': lambda arg: drop_wifi(),
     'x': lambda arg: crash(),

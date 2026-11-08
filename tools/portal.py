@@ -10,6 +10,7 @@ Usage:
   tools/portal.py show    NAME                     hold a scenario on the sign, capture and verify it
   tools/portal.py review                           walk every scenario on the sign (Enter for next)
   tools/portal.py live                             end a held scenario: back to live data
+  tools/portal.py preview IMG... | --show N        put mockups on the sign before building them
   tools/portal.py goldens                          capture every scenario as a reference image
   tools/portal.py inject  wifi|crash|hang          fault injection; exit 0 if the board recovers
   tools/portal.py soak    --minutes N              log, then summarize errors, resets, gaps, memory
@@ -493,6 +494,42 @@ def cmd_live(args):
     return 0
 
 
+PREVIEW = 'preview-%d.bmp'
+
+
+def cmd_preview(args):
+    """Mockups on the real LEDs: upload 64x32 images (one board restart), then hold one."""
+    if args.clear:
+        drive = find_drive(args.drive)
+        for p in glob.glob(os.path.join(drive, 'preview-*.bmp')):
+            os.remove(p)
+        os.sync()
+        print('previews removed (the board restarts)')
+        return 0
+    console = Console(args.port)
+    if args.images:
+        drive = find_drive(args.drive)
+        for n, path in enumerate(args.images, 1):
+            img = Image.open(path).convert('RGB')
+            scale = img.width // 64
+            if img.size != (64 * scale, 32 * scale) or not scale:
+                die('%s is %dx%d' % ((path,) + img.size), 'previews must be 64x32 (or an exact multiple)')
+            dst = os.path.join(drive, PREVIEW % n)
+            img.resize((64, 32), Image.NEAREST).save(dst, format='BMP')
+            with open(dst, 'rb+') as f:
+                os.fsync(f.fileno())
+        os.sync()
+        say('uploaded %d preview(s); waiting for the board to restart' % len(args.images))
+        if not console.wait_for('[OK]', 90, echo=False):
+            die('board did not come back after the upload', 'check `tools/portal.py logs`')
+    n = args.show or 1
+    console.ser.reset_input_buffer()
+    console.cmd('b ' + PREVIEW % n)
+    line = console.wait_for('[SCENE] ', 20, echo=False)
+    print('showing %s on the sign' % (PREVIEW % n) if line == '[SCENE] ' + PREVIEW % n else 'failed: %s' % line)
+    return 0 if line == '[SCENE] ' + PREVIEW % n else 1
+
+
 def cmd_scenarios(args):
     import scenarios
     for sc in scenarios.SCENARIOS:
@@ -686,6 +723,11 @@ def main(argv=None):
     p.add_argument('-o', '--output', default=os.path.join(ROOT, 'out', 'scenes'), help='captures (default: out/scenes/)')
     add('live', cmd_live, 'end a held scenario: back to live data')
     add('scenarios', cmd_scenarios, 'list the scenarios')
+    p = add('preview', cmd_preview, 'put mockup images on the sign, held like a scenario')
+    p.add_argument('images', nargs='*', help='64x32 PNGs (or exact multiples) to upload')
+    p.add_argument('--show', type=int, help='hold the Nth uploaded preview')
+    p.add_argument('--clear', action='store_true', help='remove previews from the board')
+    p.add_argument('--drive', help='CIRCUITPY mount point (default: autodetect)')
     add('goldens', cmd_goldens, 'capture every scenario into test_fixtures/device/ as reference images')
     p = add('inject', cmd_inject, 'inject a fault; exit 0 if the board recovers on its own')
     p.add_argument('fault', choices=sorted(INJECT))

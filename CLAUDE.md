@@ -27,7 +27,7 @@ First time: `make setup`. Outputs go to `out/` (gitignored). Read the PNGs in `o
 Every design state is a scenario in `scenarios.py` with fixed data (`make scenarios` lists them). For any change to how the sign looks:
 
 1. Add or update a scenario for each state the change affects (`test_scenarios.py` fails if a weather condition or screen kind has none).
-2. `make sim`: renders every scenario to `out/sim/` plus `sheet.png`, no board needed.
+2. `make sim`: renders every scenario to `out/sim/` plus `sheet.png`, no board needed. For an idea that isn't built yet, render a 64x32 mockup PNG and put it on the sign with `tools/portal.py preview mockup.png` (held like a scenario) before writing the code.
 3. `make deploy`, then walk the user through the affected scenarios on the sign one at a time: `tools/portal.py show NAME`, share `out/scenes/NAME/device_x10.png`, wait for the user to say next. (In a terminal: `make review`, Enter for next.)
 4. Apply feedback and repeat. Then `make verify` and `make goldens`: reference images in `test_fixtures/device/` are board captures, one PNG per scenario with its state embedded. Commit them with the change.
 5. `make live` puts the sign back on live data (any button press, or 10 min, does too).
