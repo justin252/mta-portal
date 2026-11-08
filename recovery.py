@@ -5,7 +5,7 @@ reboot once nothing has worked for REBOOT_AFTER seconds. A reboot is the only re
 that reliably clears ESP32 and socket state, and the board is back in ~15s.
 """
 
-BACKOFF = (5, 15, 30)  # seconds before each retry; most blips are one stale socket
+BACKOFF = (5, 10, 15)  # seconds before each retry; most blips are one stale socket
 REBOOT_AFTER = 180      # seconds without good data, with at least 3 failures in a row
 
 
