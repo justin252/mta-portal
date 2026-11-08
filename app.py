@@ -25,7 +25,7 @@ import diag
 import layout
 import scenarios
 import screens
-from logic import TRAIN_URL, freshness, parse_station, server_time
+from logic import TRAIN_URL, clock_text, freshness, parse_station, server_clock, server_time
 from recovery import Recovery, attempt
 from weather import WEATHER_URL, format_hi_lo, format_temperature, parse_weather
 
@@ -60,6 +60,17 @@ display = matrix.display
 fonts = {role: bitmap_font.load_font(path) for role, path in layout.FONTS.items()}
 
 
+def metrics(font):
+    """glyph(ch) -> (advance, xoff, width) for layout.centered_x, as the simulator reads from the BDF."""
+    def glyph(ch):
+        g = font.get_glyph(ord(ch))
+        return (g.shift_x, g.dx, g.width) if g else (0, 0, 0)
+    return glyph
+
+
+glyphs = {role: metrics(f) for role, f in fonts.items()}
+
+
 def tile(path):
     # OnDiskBitmap(path) keeps its own file open while shown and closes it when collected
     bmp = displayio.OnDiskBitmap(path)
@@ -70,12 +81,16 @@ def build_screen(state, fields):
     """Group with the bitmap at index 0 and one Label per field, in layout order."""
     group = displayio.Group()
     group.append(tile(state['bitmap']))
-    labels = {}
-    for field, role, x, y in fields:
+    labels, boxes = {}, {}
+    for field, role, box, y in fields:
+        text = state['texts'][field]
         labels[field] = adafruit_display_text.label.Label(
-            fonts[role], color=state['colors'][field], x=x, y=y, text=state['texts'][field])
+            fonts[role], color=state['colors'][field], text=text,
+            x=layout.centered_x(text, glyphs[role], box), y=y)
+        boxes[field] = (role, box)
         group.append(labels[field])
-    return {'name': state['screen'], 'group': group, 'labels': labels, 'bitmap': state['bitmap']}
+    return {'name': state['screen'], 'group': group, 'labels': labels, 'boxes': boxes,
+            'bitmap': state['bitmap']}
 
 
 cycle = [build_screen(screens.train_state(line, [], [], 'loading'), layout.TRAIN_FIELDS)
@@ -95,6 +110,8 @@ def apply(state):
         label = s['labels'][field]
         if label.text != text:  # re-rendering a Label allocates; skip no-op updates
             label.text = text
+            role, box = s['boxes'][field]
+            label.x = layout.centered_x(text, glyphs[role], box)
         if label.color != state['colors'][field]:
             label.color = state['colors'][field]
 
@@ -151,12 +168,28 @@ def current_state():
 live_trains = {}    # line -> (north, south) minutes from the last good fetch
 live_weather = None
 fresh = 'loading'   # logic.freshness() of live_trains, as last drawn
+clock_ref = None    # (server Unix time, board ms, UTC offset) from the last good train fetch
+clock = ''          # logic.clock_text(), as last drawn; blank until the board knows the time
 
 
 def render_live():
     for line in layout.LINES:
-        apply(screens.train_state(line, *live_trains.get(line, ([], [])), fresh))
-    apply(screens.weather_state(live_weather) if live_weather else screens.weather_placeholder())
+        north, south = live_trains.get(line, ([], []))
+        apply(screens.train_state(line, north, south, fresh, clock))
+    apply(screens.weather_state(live_weather, clock) if live_weather else screens.weather_placeholder(clock))
+
+
+def update_clock():
+    """Tick the clock from the last server time; redraw when the minute changes."""
+    global clock
+    if clock_ref is None:
+        return
+    epoch, at_ms, offset = clock_ref
+    text = clock_text(epoch + (now_ms() - at_ms) // 1000, offset)
+    if text != clock:
+        clock = text
+        if held is None:
+            render_live()
 
 
 # --- Scenarios: hold any design on the sign for review (diag 'v NAME', 'r') ---
@@ -248,15 +281,16 @@ def get_json(url):
 
 
 def fetch_trains():
-    """{line: (north, south)} minutes for every line. Raises on any failure, so the
-    display never shows one line fresh and the other stale without saying so."""
+    """({line: (north, south)} minutes, (server time, UTC offset)) for every line. Raises on
+    any failure, so the display never shows one line fresh and the other stale."""
     arrivals = {}
     for line in layout.LINES:
         payload, headers = get_json(TRAIN_URL % layout.STATIONS[line]['stop_id'])
         arrivals[line] = parse_station(payload, line, server_time(headers, payload))
+        now = server_clock(headers, payload)
         payload = None
         gc.collect()
-    return arrivals
+    return arrivals, now
 
 
 # --- Diagnostics: serial commands from tools/portal.py ---
@@ -338,13 +372,17 @@ while True:
         elif mode == 'art' and elapsed > ART_SECONDS * 1000:
             next_art()
     update_freshness()
+    update_clock()
 
     if trains.due(now_s()):
         started = now_ms()
-        arrivals, err = attempt(fetch_trains, trains, now_s)
+        result, err = attempt(fetch_trains, trains, now_s)
         took = (now_ms() - started) / 1000
         if err is None:
-            live_trains = arrivals
+            live_trains, (epoch, offset) = result
+            clock_ref = (epoch, now_ms(), offset)
+            arrivals = live_trains
+            update_clock()
             update_freshness()  # before drawing, so new data never shows with the old state
             if held is None:
                 render_live()

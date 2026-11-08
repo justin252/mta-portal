@@ -1,6 +1,6 @@
 # mta-portal
 
-Real-time NYC subway arrivals + weather on a 64x32 RGB LED matrix ([Adafruit MatrixPortal M4](https://learn.adafruit.com/adafruit-matrixportal-m4)). Auto-cycles between L train (Graham Av), G train (Metropolitan Av), and current weather. Buttons jump to a specific train screen.
+Real-time NYC subway arrivals + weather on a 64x32 RGB LED matrix ([Adafruit MatrixPortal M4](https://learn.adafruit.com/adafruit-matrixportal-m4)). Auto-cycles between L train (Graham Av), G train (Metropolitan Av), and current weather, with the time on each. UP toggles a pixel-art mode.
 
 ## Setup
 
@@ -11,9 +11,9 @@ Real-time NYC subway arrivals + weather on a 64x32 RGB LED matrix ([Adafruit Mat
 
 ## Usage
 
-Display auto-cycles **L train (4s) → G train (4s) → weather (3s)**. The weather screen joins once the first weather fetch succeeds.
+Display auto-cycles **L train (4s) → G train (4s) → weather (3s)**. The weather screen joins once the first weather fetch succeeds. Each transit screen has the time over the line logo (or weather icon) on the left and its text centered on the right.
 
-- **Arrivals**: gold numbers are live. Dim numbers are over 90s old (network trouble). `Loading` and `Offline` mean no data yet; `No trains` means the API lists none.
+- **Arrivals**: gold numbers are live. Dim numbers are over 90s old (network trouble). Three dim dots mean the first fetch since boot isn't back yet; `offline` means fetches are failing with no data; dim `-,-,-` means the API lists no trains that way.
 - **Weather**: an icon for the condition (sun or moon, partly cloudy day or night, cloud, fog, drizzle, rain, showers, sleet, snow, storm), the condition, the temperature, and today's high and low (`H:61 L:45`).
 
 - **UP**: art mode on/off (pixel art, a new piece every 10s: rooftop-disco train, Manhattan skyline, Williamsburg Bridge, pizza rat)
@@ -37,7 +37,7 @@ Data sources: [wheresthefuckingtrain.com](https://www.wheresthefuckingtrain.com/
 
 **Polling (30s)**: MTA feeds update ~30s. Each fetch blocks the main loop for about a second (no threading in CircuitPython), so the screen showing during a fetch stays up about a second longer; polling more often would make that worse.
 
-**Server time**: minutes are computed against the train API's own HTTP `Date` header, so the board needs no clock sync and no timezone setting.
+**Server time**: minutes and the clock come from the train API's own HTTP `Date` header and the UTC offset in its timestamps, so the board needs no clock sync and no timezone setting, and daylight saving just works.
 
 **Error recovery**: a failed fetch retries after 5, 10, then every 15s, rejoining WiFi if the link is down. If nothing succeeds for 3 minutes, the board reboots, which is the one reset that reliably clears ESP32 and socket state. Nothing ever gives up: outages just mean another retry or reboot until the network is back. Any unexpected exception soft-reloads the board instead of halting it, a 16s hardware watchdog catches hangs, and `safemode.py` resets out of safe mode after a brownout. Details: [docs/failure-modes.md](docs/failure-modes.md).
 

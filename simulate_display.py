@@ -72,6 +72,16 @@ def font(role):
     return _fonts[role]
 
 
+def glyph_metrics(role):
+    """glyph(ch) -> (advance, xoff, width) for layout.centered_x, like app.py's from the board's fonts."""
+    fnt = font(role)
+
+    def glyph(ch):
+        g = fnt['glyphs'].get(ord(ch))
+        return (g['dwidth'], g['bbx'][2], g['bbx'][0]) if g else (0, 0, 0)
+    return glyph
+
+
 def ink_right(fnt, text, x):
     """One past the last lit column of text drawn at x (trailing glyph spacing draws nothing)."""
     right, cursor = x, x
@@ -132,10 +142,11 @@ def render_screen(state):
     canvas = Image.new('RGB', (DISPLAY_W, DISPLAY_H), (0, 0, 0))
     canvas.paste(Image.open(os.path.join(SCRIPT_DIR, bitmap)).convert('RGB'), (0, 0))
     colors = state.get('colors', {})
-    for field, role, x, y in fields:
+    for field, role, box, y in fields:
         c = colors.get(field)
         color = ((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF) if c is not None else COLORS[role]
-        render_text(canvas, font(role), texts.get(field, ''), x, y, color)
+        text = texts.get(field, '')
+        render_text(canvas, font(role), text, layout.centered_x(text, glyph_metrics(role), box), y, color)
     return canvas
 
 
